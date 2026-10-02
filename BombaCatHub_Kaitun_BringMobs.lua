@@ -1447,12 +1447,18 @@ end
 
     -- [UPDATED] Đổi tốc độ theo bản boss man đưa: 0.01s / 20° (mượt hơn
     -- bản cũ 0.4s / 80°, xoay liên tục thay vì giật cục)
+    -- [FIXED v2] Órbita por TEMPO (graus/segundo) em vez de +20° por frame.
+    -- Antes o alvo rodava ~1200°/s e saltava ~14 studs por frame: o voo
+    -- tentava perseguir um ponto que mudava de lado a cada frame → "pára e
+    -- volta". Agora roda a Config.OrbitDegPerSec (def. 120°/s) e sem
+    -- arredondar a posição, para o personagem conseguir acompanhar.
     CaculateCircreDirection = function(a)
-        if W_angle > 50000 then W_angle = 60 end
-        W_angle = W_angle + ((tick() - lastChange) > 0.01 and 20 or 0)
-        if tick() - lastChange > 0.01 then lastChange = tick() end
+        local now = tick()
+        local deg = Config.OrbitDegPerSec or 120
+        W_angle = (W_angle + deg * math.min(now - lastChange, 0.1)) % 360
+        lastChange = now
         local h = a + Vector3.new(math.cos(math.rad(W_angle)) * 40, 0, math.sin(math.rad(W_angle)) * 40)
-        return CFrame.new(RoundVector3Down(h.p))
+        return CFrame.new(h.p)
     end
 
     function GetMonAsSortedRange()
@@ -1662,46 +1668,126 @@ end
         local blockfind = workspace:FindFirstChild(block.Name)
         if blockfind and blockfind ~= block then blockfind:Destroy() end
     end
-    task.spawn(function()
-        while task.wait() do
-            if block and block.Parent == workspace then
-                getgenv().OnFarm = shouldTween and true or false
-            else
-                getgenv().OnFarm = false
+    -- ============================================================
+    -- [NEW v2] FLY CONTROLLER — voo contínuo e fluido
+    -- Problemas do tween antigo (Create chamado a cada frame):
+    --  1) cada chamada cancelava e recriava o tween → arranques/paragens;
+    --  2) ao chegar, shouldTween=false largava o personagem do "block"
+    --     (colisões + gravidade) e o frame seguinte voltava a prendê-lo;
+    --  3) se o servidor puxava o personagem >200 studs, o block era
+    --     re-sincronizado para trás ("loopback") sem qualquer ajuste;
+    --  4) GetDescendants() + CanCollide em TODAS as chamadas = FPS a cair.
+    -- Agora: UM loop no Heartbeat move o block em direção a FlyCtl.Goal a
+    -- velocidade constante (dt-based). Create() só actualiza o alvo.
+    -- Se detectar rubber-band, reduz a velocidade sozinho e recupera depois.
+    -- Config opcional: FlySpeed (def. 200), FlySpeedMax (def. 260, só em
+    -- distâncias longas), OrbitDegPerSec (def. 120).
+    -- ============================================================
+    FlyCtl = {
+        Goal = nil, LastCall = 0, MaxAge = 10, Active = false,
+        Penalty = 1, PenaltyUntil = 0, LastSet = nil, LastBackoff = 0, WasOn = false,
+    }
+    function FlyCtl.SpeedFor(dist)
+        local base = Config.FlySpeed or 200
+        local maxs = Config.FlySpeedMax or 260
+        local t = math.clamp((dist - 600) / 2400, 0, 1)
+        return (base + (maxs - base) * t) * FlyCtl.Penalty
+    end
+    function FlyCtl.SetGoal(cf)
+        FlyCtl.Goal = cf
+        FlyCtl.LastCall = tick()
+        local c = game.Players.LocalPlayer.Character
+        local r = c and c:FindFirstChild("HumanoidRootPart")
+        local d = r and (cf.Position - r.Position).Magnitude or 0
+        FlyCtl.MaxAge = d / 60 + 5   -- tempo máx. sem nova chamada antes de desistir
+    end
+    -- compat: o resto do script chama TweenInstance:Cancel()
+    TweenInstance = {
+        PlaybackState = Enum.PlaybackState.Playing,
+        Cancel = function() FlyCtl.Goal = nil end,
+    }
+
+    game:GetService("RunService").Heartbeat:Connect(function(dt)
+        pcall(function()
+            dt = math.min(dt, 0.05)
+            local char = game.Players.LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if not hrp or not block or block.Parent ~= workspace then
+                getgenv().OnFarm = false; shouldTween = false
+                return
             end
-        end
-    end)
-    task.spawn(function()
-        local a = game.Players.LocalPlayer
-        repeat task.wait() until a.Character and a.Character.PrimaryPart
-        block.CFrame = a.Character.PrimaryPart.CFrame
-        while task.wait() do
-            pcall(function()
-                if getgenv().OnFarm then
-                    if block and block.Parent == workspace then
-                        local b = a.Character and a.Character.PrimaryPart
-                        if b and (b.Position - block.Position).Magnitude <= 200 then
-                            b.CFrame = block.CFrame
-                        else
-                            block.CFrame = b.CFrame
-                        end
-                    end
-                    local c = a.Character
-                    if c then
-                        for _, e in pairs(c:GetChildren()) do
-                            if e:IsA("BasePart") then e.CanCollide = false end
-                        end
-                    end
-                else
-                    local c = a.Character
-                    if c then
-                        for _, e in pairs(c:GetChildren()) do
-                            if e:IsA("BasePart") then e.CanCollide = true end
-                        end
-                    end
+            local now  = tick()
+            local goal = FlyCtl.Goal
+            if goal and (now - FlyCtl.LastCall) > FlyCtl.MaxAge then
+                FlyCtl.Goal = nil; goal = nil
+            end
+
+            local active = false
+            if goal then
+                if not FlyCtl.Active then
+                    block.CFrame = hrp.CFrame      -- começa sempre onde o personagem está
+                    FlyCtl.LastSet = nil
                 end
-            end)
-        end
+                local d0 = (goal.Position - block.Position).Magnitude
+                -- a caminho → continua; chegou → mantém 0.35s após a última chamada
+                active = d0 > 0.5 or (now - FlyCtl.LastCall) < 0.35
+                if not active then FlyCtl.Goal = nil end
+            end
+
+            if active then
+                FlyCtl.Active = true
+                local cur = block.Position
+
+                -- deteção de rubber-band: o servidor/anti-cheat devolveu-nos para trás
+                if FlyCtl.LastSet and (hrp.Position - FlyCtl.LastSet).Magnitude > 30
+                   and now - FlyCtl.LastBackoff > 0.5 then
+                    FlyCtl.LastBackoff = now
+                    FlyCtl.Penalty = math.max(0.55, FlyCtl.Penalty - 0.12)
+                    FlyCtl.PenaltyUntil = now + 25
+                    block.CFrame = hrp.CFrame
+                    cur = block.Position
+                end
+                if now > FlyCtl.PenaltyUntil and FlyCtl.Penalty < 1 then
+                    FlyCtl.Penalty = math.min(1, FlyCtl.Penalty + dt * 0.04)
+                end
+
+                local delta = goal.Position - cur
+                local d = delta.Magnitude
+                local step = FlyCtl.SpeedFor(d) * dt
+                local newPos = (d <= step) and goal.Position or (cur + delta.Unit * step)
+
+                block.CFrame = CFrame.new(newPos)
+                hrp.CFrame = block.CFrame
+                hrp.AssemblyLinearVelocity  = Vector3.zero
+                hrp.AssemblyAngularVelocity = Vector3.zero
+                FlyCtl.LastSet = newPos
+                getgenv().OnFarm = true; shouldTween = true
+            else
+                FlyCtl.Active = false
+                FlyCtl.LastSet = nil
+                block.CFrame = hrp.CFrame
+                getgenv().OnFarm = false; shouldTween = false
+            end
+        end)
+    end)
+
+    -- noclip enquanto voa (Stepped = antes da física, como o original fazia por frame)
+    game:GetService("RunService").Stepped:Connect(function()
+        pcall(function()
+            local c = game.Players.LocalPlayer.Character
+            if not c then return end
+            local on = getgenv().OnFarm and true or false
+            if on then
+                for _, e in ipairs(c:GetChildren()) do
+                    if e:IsA("BasePart") then e.CanCollide = false end
+                end
+            elseif FlyCtl.WasOn then
+                for _, e in ipairs(c:GetChildren()) do
+                    if e:IsA("BasePart") then e.CanCollide = true end
+                end
+            end
+            FlyCtl.WasOn = on
+        end)
     end)
 
     local W = 0
@@ -1774,7 +1860,6 @@ end
     function TweenController.Create(W)
         if not W or TweenDebounce then return end
         local a = typeof(W) ~= 'CFrame' and ConvertTo(CFrame, W) or W
-        if TweenInstance then pcall(function() TweenInstance:Cancel() end) end
         local character = game.Players.LocalPlayer.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
@@ -1783,9 +1868,6 @@ end
         -- nhánh BypassTP (dist>=4000 → đổi spawn point) — không còn dùng
         -- cơ chế bypass qua spawn point nữa, mọi khoảng cách đều tween bình
         -- thường qua block (từ main_red_magic_beta.txt).
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then part.CanCollide = false end
-        end
         local head = character:WaitForChild("Head")
         if not head:FindFirstChild("eltrul") then
             local bv = Instance.new('BodyVelocity')
@@ -1811,38 +1893,8 @@ end
             net:RemoteFunction('SubmarineWorkerSpeak'):InvokeServer('TravelToSubmergedIsland')
         end
 
-        a = CFrame.new(a.Position)
-        local dist = CaculateDistance(hrp.CFrame, a)
-
-        if dist <= 5 then
-            hrp.CFrame = a
-            block.CFrame = a
-            return
-        end
-
-        -- [FIXED - theo yêu cầu boss man: "chỉnh lên 160 cho nhanh ko vượt
-        -- quá 160"] Bỏ hẳn bảng 110/100 cũ — dùng 1 mức tốc độ CỐ ĐỊNH 160
-        -- (giống tween của main_red_magic_beta.txt, chỉ đổi số chia 300 →
-        -- 160 để nhanh hơn), không có mức nào vượt quá con số này.
-        local divisor = 160
-        local duration = dist / divisor
-
-        -- [FIXED - port tween từ main_red_magic_beta.txt] Tween "block"
-        -- (Part vô hình) thay vì tween thẳng hrp — nhân vật tự bám theo
-        -- block qua vòng lặp sync đã thêm ở trên (getgenv().OnFarm).
-        shouldTween = true
-        TweenInstance = Services.TweenService:Create(block, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = a})
-        TweenInstance:Play()
-        task.spawn(function()
-            while TweenInstance and TweenInstance.PlaybackState == Enum.PlaybackState.Playing do
-                if not shouldTween then
-                    pcall(function() TweenInstance:Cancel() end)
-                    break
-                end
-                task.wait(0.1)
-            end
-            shouldTween = false
-        end)
+        -- [FIXED v2] só actualiza o alvo; o movimento é feito pelo FlyCtl (Heartbeat)
+        FlyCtl.SetGoal(CFrame.new(a.Position))
     end
 
     -- ============================================================
