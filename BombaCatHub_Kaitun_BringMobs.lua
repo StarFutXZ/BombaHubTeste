@@ -820,6 +820,19 @@ function hoangtuveu()
     containerLayout.FillDirection = Enum.FillDirection.Vertical
     containerLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
+    local discordLabel = Instance.new("TextLabel")
+    discordLabel.Name = "DiscordLabel"
+    discordLabel.Parent = container
+    discordLabel.LayoutOrder = 1
+    discordLabel.AutomaticSize = Enum.AutomaticSize.XY
+    discordLabel.Size = UDim2.new(0, 0, 0, 0)
+    discordLabel.BackgroundTransparency = 1
+    discordLabel.Text = "https://discord.gg/KrEPeAtjn"
+    discordLabel.TextSize = 13
+    discordLabel.Font = Enum.Font.Highway
+    discordLabel.TextColor3 = Color3.fromRGB(255, 45, 155)
+    discordLabel.TextXAlignment = Enum.TextXAlignment.Center
+
     local frame = Instance.new("Frame")
     frame.Name = "Frame"
     frame.Parent = container
@@ -839,7 +852,7 @@ function hoangtuveu()
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local stroke = Instance.new("UIStroke", frame)
-    stroke.Color = Color3.fromRGB(255, 255, 0)
+    stroke.Color = Color3.fromRGB(255, 45, 155)
     stroke.Thickness = 1.5
     stroke.Transparency = 0
 
@@ -871,7 +884,7 @@ function hoangtuveu()
     taskLabel.Text = "Status :"
     taskLabel.TextSize = 14
     taskLabel.Font = Enum.Font.Ubuntu
-    taskLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+    taskLabel.TextColor3 = Color3.fromRGB(255, 170, 220)
     taskLabel.TextXAlignment = Enum.TextXAlignment.Left
 
     local subTaskLabel = Instance.new("TextLabel")
@@ -884,7 +897,7 @@ function hoangtuveu()
     subTaskLabel.Text = "Sub Task :"
     subTaskLabel.TextSize = 13
     subTaskLabel.Font = Enum.Font.Ubuntu
-    subTaskLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+    subTaskLabel.TextColor3 = Color3.fromRGB(255, 170, 220)
     subTaskLabel.TextTransparency = 0
     subTaskLabel.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -1902,131 +1915,91 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     -- KHÔNG lock quái mà CombatController đang target dở — tránh xung đột
     -- 2 hệ thống cùng giữ 1 con quái theo 2 cách khác nhau.
     -- ============================================================
-    -- BRING MOBS adaptado ao Kaitun:
-    -- usa CurrentFarmTargets e MonResult; junta apenas mobs do mesmo nome
-    -- ao alvo atual e evita reposicionar o próprio MonResult.
-    getgenv().BringMonster = getgenv().BringMonster ~= false
-    getgenv().CurrentFarmTargets = getgenv().CurrentFarmTargets or {}
-    local BringBodyPositions = setmetatable({}, { __mode = "k" })
-    local BringOriginalCollisions = setmetatable({}, { __mode = "k" })
-    local BringLastTick = 0
-
-    local function ClearBringFor(model)
-        local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
-        local bodyPos = root and root:FindFirstChild("KaitunBringBodyPos")
-        if bodyPos then
-            pcall(function() bodyPos:Destroy() end)
-        end
-        BringBodyPositions[model] = nil
-
-        local saved = BringOriginalCollisions[model]
-        if saved then
-            for part, canCollide in pairs(saved) do
-                if part and part.Parent then
-                    pcall(function() part.CanCollide = canCollide end)
-                end
-            end
-            BringOriginalCollisions[model] = nil
-        end
-    end
+    getgenv().BringMonster = getgenv().BringMonster or false
+    PosMon = PosMon or nil
+    Mon = Mon or nil
 
     BringEnemy = function()
         pcall(function()
-            local now = tick()
-            if now - BringLastTick < 0.10 then return end
-            BringLastTick = now
+            if not Config.BringMobs or not getgenv().BringMonster then return end
+            if not PosMon then return end
 
-            local player = Players.LocalPlayer
-            local char = player and player.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local _char = LocalPlayer.Character
+            if not _char then return end
+            local _root = _char:FindFirstChild("HumanoidRootPart")
+            if not _root then return end
+
+            local targetCF = typeof(PosMon) == "CFrame" and PosMon or CFrame.new(PosMon)
+            local pinCF     = targetCF * CFrame.new(0, 3, 0)
+            local maxPull   = 20
+            local pulled    = 0
+            local bringRange = 300 -- [FIXED] 888 → 300 theo yêu cầu boss man
+
+            local targetName = (Mon and Mon ~= "") and Mon or nil
+
+            local function LockMob(v, hrp, hum)
+                hrp.CFrame     = pinCF
+                hrp.CanCollide = false
+
+                local head = v:FindFirstChild("Head")
+                if head then
+                    head.CFrame     = pinCF * CFrame.new(0, 2, 0)
+                    head.CanCollide = false
+                end
+
+                hum.WalkSpeed  = 0
+                hum.JumpPower  = 0
+                hum.AutoRotate = false
+
+                local anim = hum:FindFirstChildOfClass("Animator")
+                if anim then anim:Destroy() end
+
+                for _, t in ipairs(v:GetChildren()) do
+                    if t:IsA("Script") or t:IsA("LocalScript") then
+                        t.Disabled = true
+                    end
+                end
+
+                if hrp:FindFirstChild("_Lock") then
+                    hrp._Lock.Velocity = Vector3.new(0, 0, 0)
+                    hrp._Lock.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+                else
+                    local bv    = Instance.new("BodyVelocity")
+                    bv.Name     = "_Lock"
+                    bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+                    bv.Velocity = Vector3.new(0, 0, 0)
+                    bv.Parent   = hrp
+                end
+
+                pcall(function() sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge) end)
+                hum:ChangeState(11)
+            end
+
             local enemyFolder = workspace:FindFirstChild("Enemies")
-            local targets = getgenv().CurrentFarmTargets or {}
+            if enemyFolder then
+                for _, v in ipairs(enemyFolder:GetChildren()) do
+                    if pulled >= maxPull then break end
+                    if targetName and v.Name ~= targetName then continue end
+                    -- (Đã bỏ check "đừng lock quái CombatController đang đánh" —
+                    -- field CombatController.CurrentTarget không tồn tại thật
+                    -- trong code, check đó luôn so với nil, không bảo vệ được
+                    -- gì. Thực tế lock (đứng im) không cản CombatController
+                    -- gây damage, nên không cần check này.)
 
-            if not Config.BringMobs or not getgenv().BringMonster
-                or not root or not enemyFolder or next(targets) == nil then
-                for model in pairs(BringBodyPositions) do
-                    ClearBringFor(model)
-                end
-                return
-            end
+                    local hrp = v:FindFirstChild("HumanoidRootPart")
+                    local hum = v:FindFirstChild("Humanoid")
+                    if not hrp or not hum or hum.Health <= 0 then continue end
+                    if (hrp.Position - _root.Position).Magnitude > bringRange then continue end
 
-            -- Usa o alvo ativo como ponto de reunião; se não houver um válido,
-            -- escolhe o primeiro mob vivo que corresponda aos nomes do farm.
-            local anchor = MonResult
-            local anchorHum = anchor and anchor:FindFirstChildOfClass("Humanoid")
-            local anchorRoot = anchor and (anchor:FindFirstChild("HumanoidRootPart") or anchor.PrimaryPart)
-            if not (anchor and anchor.Parent == enemyFolder and anchorHum
-                and anchorHum.Health > 0 and anchorRoot and targets[anchor.Name]) then
-                anchor, anchorRoot = nil, nil
-                for _, mob in ipairs(enemyFolder:GetChildren()) do
-                    local hum = mob:FindFirstChildOfClass("Humanoid")
-                    local mobRoot = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
-                    if targets[mob.Name] and hum and hum.Health > 0 and mobRoot then
-                        anchor, anchorRoot = mob, mobRoot
-                        break
-                    end
-                end
-            end
-
-            if not anchor or not anchorRoot then
-                for model in pairs(BringBodyPositions) do
-                    ClearBringFor(model)
-                end
-                return
-            end
-
-            local bringRange = math.clamp(tonumber(Config.BringMobsRadius) or 300, 100, 400)
-            local anchorPosition = anchorRoot.Position
-            local active = {}
-
-            for _, mob in ipairs(enemyFolder:GetChildren()) do
-                local hum = mob:FindFirstChildOfClass("Humanoid")
-                local mobRoot = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
-
-                if mob ~= anchor and targets[mob.Name] and hum and hum.Health > 0
-                    and mobRoot
-                    and (mobRoot.Position - root.Position).Magnitude <= bringRange
-                    and (mobRoot.Position - anchorPosition).Magnitude <= bringRange then
-
-                    active[mob] = true
-                    local bodyPos = mobRoot:FindFirstChild("KaitunBringBodyPos")
-                    if not bodyPos then
-                        bodyPos = Instance.new("BodyPosition")
-                        bodyPos.Name = "KaitunBringBodyPos"
-                        bodyPos.MaxForce = Vector3.new(1000000, 1000000, 1000000)
-                        bodyPos.P = 8000
-                        bodyPos.D = 600
-                        bodyPos.Position = mobRoot.Position
-                        bodyPos.Parent = mobRoot
-                    end
-                    BringBodyPositions[mob] = bodyPos
-
-                    if not BringOriginalCollisions[mob] then
-                        BringOriginalCollisions[mob] = {}
-                        for _, part in ipairs(mob:GetDescendants()) do
-                            if part:IsA("BasePart") then
-                                BringOriginalCollisions[mob][part] = part.CanCollide
-                                part.CanCollide = false
-                            end
-                        end
-                    end
-
-                    mobRoot.AssemblyLinearVelocity = Vector3.zero
-                    mobRoot.AssemblyAngularVelocity = Vector3.zero
-                    bodyPos.Position = anchorPosition + Vector3.new(0, 2, 0)
-                end
-            end
-
-            for model in pairs(BringBodyPositions) do
-                if not active[model] or not model.Parent then
-                    ClearBringFor(model)
+                    LockMob(v, hrp, hum)
+                    pulled = pulled + 1
                 end
             end
         end)
     end
 
     task.spawn(function()
-        while task.wait(0.10) do
+        while task.wait(0.05) do
             BringEnemy()
         end
     end)
@@ -2096,13 +2069,6 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         end
         sethiddenproperty(game.Players.LocalPlayer, 'SimulationRadius', math.huge)
         h = type(h) == "string" and {h} or (h or {})
-
-        -- Guarda os nomes usados pelo farm nesta chamada.
-        getgenv().CurrentFarmTargets = {}
-        for _, farmName in ipairs(h) do
-            getgenv().CurrentFarmTargets[tostring(farmName)] = true
-        end
-
         for y, L in (h) do
             local b = tostring(L)
             if b == 'Deandre' or b == "Urban" or b == "Diablo" and (os.time() - (LastFire12 or 0)) > 180 then
@@ -6179,7 +6145,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     end
 end
 
-
+hoangtuveu()
 --============================================================
 -- [EXTRAS] NO ANIMATION + AUTO REDEEM CODES + AUTO RANDOM FRUIT (GACHA)
 -- Opções (pode editar/desligar):
@@ -6215,61 +6181,23 @@ task.spawn(function()
     -- AUTO REDEEM CODES
     task.spawn(function()
         if not Config.Extras.AutoRedeemCodes then return end
-
-        local ReplicatedStorage = game:GetService("ReplicatedStorage")
-        local remotes = ReplicatedStorage:WaitForChild("Remotes", 30)
-
-        if not remotes then
-            warn("[Kaitun][2xEXP] Remotes não encontrados.")
-            return
-        end
-
-        local redeem = remotes:WaitForChild("Redeem", 30)
-
-        if not redeem then
-            warn("[Kaitun][2xEXP] Remote Redeem não encontrado.")
-            return
-        end
-
-        -- Códigos 2x EXP ativos segundo listas atualizadas em 02/10/2026.
         local REDEEM_CODES = {
-            "EASTEREXP",
-            "SUB2CAPTAINMAUI",
-            "Enyu_is_Pro",
-            "Starcodeheo",
-            "Sub2Fer999",
-            "Magicbus",
-            "JCWK",
-            "kittgaming",
-            "Bluxxy",
-            "SUB2GAMERROBOT_EXP1",
-            "Axiore",
-            "Sub2Daigrock",
-            "Sub2NoobMaster123",
-            "StrawHatMaine",
-            "TantaiGaming",
-            "TheGreatAce",
-            "Sub2OfficialNoobie",
+            "fudd10", "fudd10_V2", "Chandler", "BIGNEWS", "KITT_RESET",
+            "Sub2UncleKizaru", "SUB2GAMERROBOT_RESET1", "Sub2Fer999", "Enyu_is_Pro",
+            "JCWK", "StarcodeHEO", "MagicBUS", "KittGaming", "Sub2CaptainMaui",
+            "Sub2OfficialNoobie", "TheGreatAce", "Sub2NoobMaster123", "Sub2Daigrock",
+            "Axiore", "StrawHatMaine", "TantaiGaming", "Bluxxy", "SUB2GAMERROBOT_EXP1",
         }
-
-        task.wait(5)
-        print("[Kaitun][2xEXP] A tentar " .. #REDEEM_CODES .. " códigos...")
-
+        local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+        local redeem = remotes:FindFirstChild("Redeem") or remotes:WaitForChild("Redeem", 10)
+        local commF = remotes:FindFirstChild("CommF_")
         for _, code in ipairs(REDEEM_CODES) do
-            local ok, result = pcall(function()
-                return redeem:InvokeServer(code)
+            pcall(function()
+                if redeem then redeem:InvokeServer(code)
+                elseif commF then commF:InvokeServer("Redeem", code) end
             end)
-
-            if ok then
-                print("[Kaitun][2xEXP] Tentado: " .. code)
-            else
-                warn("[Kaitun][2xEXP] Falhou em " .. code .. ": " .. tostring(result))
-            end
-
             task.wait(1)
         end
-
-        print("[Kaitun][2xEXP] Finalizado.")
     end)
 
     -- AUTO RANDOM FRUIT (GACHA - Zioles)
@@ -6755,8 +6683,8 @@ task.spawn(function()
 
     local UIGradient = Instance.new("UIGradient", UIStroke)
     UIGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 0)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 0))
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(204, 52, 235)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(97, 0, 117))
     })
 
     local function makeLabel(text, pos, size)
@@ -6773,27 +6701,27 @@ task.spawn(function()
         return lbl
     end
 
-    local TextLabel = makeLabel("BombaCat Hub", UDim2.new(0.4, 0, 0.05, 0))
+    local TextLabel = makeLabel("Hex Hub", UDim2.new(0.4, 0, 0.05, 0))
     local UIGradient2 = Instance.new("UIGradient", TextLabel)
     UIGradient2.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 0)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 0))
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(204, 52, 235)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(97, 0, 117))
     })
 
     local TextLabel2 = makeLabel(" Account Stats ", UDim2.new(0.2, 0, 0.25, 0), UDim2.new(0, 150, 0, 18))
     TextLabel2.TextSize = 18
     local UIGradient3 = Instance.new("UIGradient", TextLabel2)
     UIGradient3.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 0)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 0))
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(204, 52, 235)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(97, 0, 117))
     })
 
     local TextLabel3 = makeLabel(" Account Items ", UDim2.new(0.75, 0, 0.25, 0), UDim2.new(0, 150, 0, 18))
     TextLabel3.TextSize = 18
     local UIGradient4 = Instance.new("UIGradient", TextLabel3)
     UIGradient4.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 0)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 0))
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(204, 52, 235)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(97, 0, 117))
     })
 
     UI.Level = makeLabel("Level: 0", UDim2.new(0.07, 0, 0.35, 0))
@@ -6867,7 +6795,7 @@ task.spawn(function()
     ToggleBtn.AnchorPoint = Vector2.new(0, 0.5)
     ToggleBtn.Position = UDim2.new(0, 15, 0.5, 0)
     ToggleBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    ToggleBtn.Image = "rbxthumb://type=Asset&id=113347835552896&w=420&h=420"
+    ToggleBtn.Image = "rbxthumb://type=Asset&id=100653737935048&w=420&h=420"
     ToggleBtn.ZIndex = 100
     ToggleBtn.Draggable = true
     ToggleBtn.Active = true
@@ -6925,8 +6853,3 @@ task.spawn(function()
 
     getgenv().HexUI = UI
 end)
-
---============================================================
--- INICIAR KAITUN DEPOIS DE TODO O SETUP
---============================================================
-hoangtuveu()
