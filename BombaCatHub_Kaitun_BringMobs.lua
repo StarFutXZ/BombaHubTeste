@@ -1908,101 +1908,89 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     CombatController = {GRAB = false, GRAB_DISTANCE = SeaIndex == 1 and 250 or 350, MAX_ATTACK_DURATION = 2, MAX_ATTACK_DURATION_2 = 60, LEVITATE_TIME = 0, CurrentIndex = 1}
 
     -- ============================================================
-    -- [NEW] BRING MOBS — trích từ Maru Hub, boss man yêu cầu chỉnh
-    -- bringRange 888 → 300 (giảm cho gọn, đỡ kéo quái từ quá xa)
-    -- Config.BringMobs bật/tắt; PosMon/Mon set từ bên ngoài lúc cần kéo
-    -- quái về 1 điểm cụ thể (VD: farm quest cần gom quái).
-    -- KHÔNG lock quái mà CombatController đang target dở — tránh xung đột
-    -- 2 hệ thống cùng giữ 1 con quái theo 2 cách khác nhau.
+    -- [NEW v2] BRING MOBS — puxa SÓ para o 1.º mob que comecei a matar
+    -- * Anchor = o mob com que o ataque começou (BringSetAnchor).
+    --   Mantém-se fixo até esse mob morrer / o combate acabar; depois
+    --   o próximo mob atacado passa a ser o novo anchor.
+    -- * Só puxa mobs do MESMO NOME do anchor, dentro de BringRadius do anchor.
+    -- * Corre no Heartbeat (cada frame) para os mobs não "fugirem" entre updates.
+    -- * Só mexe em mobs de que somos network owner (senão não replica).
+    -- * Config.BringMobs liga/desliga. Config.BringRadius (opcional, def. 350),
+    --   Config.BringMaxMobs (opcional, def. 25).
     -- ============================================================
-    getgenv().BringMonster = getgenv().BringMonster or false
-    PosMon = PosMon or nil
-    Mon = Mon or nil
+    BringAnchor     = nil   -- Model do 1.º mob atacado
+    BringAnchorTick = 0     -- atualizado pelo loop de ataque (auto-limpa ao sair)
 
-    BringEnemy = function()
-        pcall(function()
-            if not Config.BringMobs or not getgenv().BringMonster then return end
-            if not PosMon then return end
-
-            local _char = LocalPlayer.Character
-            if not _char then return end
-            local _root = _char:FindFirstChild("HumanoidRootPart")
-            if not _root then return end
-
-            local targetCF = typeof(PosMon) == "CFrame" and PosMon or CFrame.new(PosMon)
-            local pinCF     = targetCF * CFrame.new(0, 3, 0)
-            local maxPull   = 20
-            local pulled    = 0
-            local bringRange = 300 -- [FIXED] 888 → 300 theo yêu cầu boss man
-
-            local targetName = (Mon and Mon ~= "") and Mon or nil
-
-            local function LockMob(v, hrp, hum)
-                hrp.CFrame     = pinCF
-                hrp.CanCollide = false
-
-                local head = v:FindFirstChild("Head")
-                if head then
-                    head.CFrame     = pinCF * CFrame.new(0, 2, 0)
-                    head.CanCollide = false
-                end
-
-                hum.WalkSpeed  = 0
-                hum.JumpPower  = 0
-                hum.AutoRotate = false
-
-                local anim = hum:FindFirstChildOfClass("Animator")
-                if anim then anim:Destroy() end
-
-                for _, t in ipairs(v:GetChildren()) do
-                    if t:IsA("Script") or t:IsA("LocalScript") then
-                        t.Disabled = true
-                    end
-                end
-
-                if hrp:FindFirstChild("_Lock") then
-                    hrp._Lock.Velocity = Vector3.new(0, 0, 0)
-                    hrp._Lock.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-                else
-                    local bv    = Instance.new("BodyVelocity")
-                    bv.Name     = "_Lock"
-                    bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-                    bv.Velocity = Vector3.new(0, 0, 0)
-                    bv.Parent   = hrp
-                end
-
-                pcall(function() sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge) end)
-                hum:ChangeState(11)
-            end
-
-            local enemyFolder = workspace:FindFirstChild("Enemies")
-            if enemyFolder then
-                for _, v in ipairs(enemyFolder:GetChildren()) do
-                    if pulled >= maxPull then break end
-                    if targetName and v.Name ~= targetName then continue end
-                    -- (Đã bỏ check "đừng lock quái CombatController đang đánh" —
-                    -- field CombatController.CurrentTarget không tồn tại thật
-                    -- trong code, check đó luôn so với nil, không bảo vệ được
-                    -- gì. Thực tế lock (đứng im) không cản CombatController
-                    -- gây damage, nên không cần check này.)
-
-                    local hrp = v:FindFirstChild("HumanoidRootPart")
-                    local hum = v:FindFirstChild("Humanoid")
-                    if not hrp or not hum or hum.Health <= 0 then continue end
-                    if (hrp.Position - _root.Position).Magnitude > bringRange then continue end
-
-                    LockMob(v, hrp, hum)
-                    pulled = pulled + 1
-                end
-            end
-        end)
+    function BringSetAnchor(mob)
+        BringAnchor     = mob
+        BringAnchorTick = tick()
+    end
+    function BringKeepAlive()
+        BringAnchorTick = tick()
     end
 
-    task.spawn(function()
-        while task.wait(0.05) do
-            BringEnemy()
+    local _bringSimTick = 0
+    local function _isMine(part)
+        if not isnetworkowner then return true end
+        local ok, res = pcall(isnetworkowner, part)
+        return (not ok) or res
+    end
+
+    BringEnemy = function()
+        if not Config.BringMobs then return end
+        local anchor = BringAnchor
+        if not anchor or anchor.Parent ~= workspace:FindFirstChild("Enemies") then return end  -- ignora templates do ReplicatedStorage
+        if tick() - BringAnchorTick > 0.6 then return end          -- combate já acabou
+        local aHum  = anchor:FindFirstChildOfClass("Humanoid")
+        local aRoot = anchor:FindFirstChild("HumanoidRootPart")
+        if not aHum or aHum.Health <= 0 or not aRoot then return end
+
+        local folder = workspace:FindFirstChild("Enemies")
+        if not folder then return end
+
+        -- network ownership: re-aplicar 1x por segundo chega
+        if tick() - _bringSimTick > 1 then
+            _bringSimTick = tick()
+            pcall(function() sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge) end)
+            pcall(function() sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", math.huge) end)
         end
+
+        local radius  = Config.BringRadius or 350
+        local maxPull = Config.BringMaxMobs or 25
+        local target  = aRoot.CFrame
+        local aPos    = aRoot.Position
+        local pulled  = 0
+
+        for _, v in ipairs(folder:GetChildren()) do
+            if pulled >= maxPull then break end
+            if v ~= anchor and v.Name == anchor.Name then
+                local hum  = v:FindFirstChildOfClass("Humanoid")
+                local root = v:FindFirstChild("HumanoidRootPart")
+                if hum and root and hum.Health > 0
+                   and (root.Position - aPos).Magnitude <= radius
+                   and _isMine(root) then
+                    pulled = pulled + 1
+                    if (root.Position - aPos).Magnitude > 2 then
+                        root.CFrame = target
+                    end
+                    root.CanCollide = false
+                    root.AssemblyLinearVelocity  = Vector3.zero
+                    root.AssemblyAngularVelocity = Vector3.zero
+                    hum.WalkSpeed = 0
+                    hum.JumpPower = 0
+                    hum.AutoRotate = false
+                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
+                    local head = v:FindFirstChild("Head")
+                    if head then head.CanCollide = false end
+                end
+            end
+        end
+    end
+
+    game:GetService("RunService").Heartbeat:Connect(function()
+        pcall(BringEnemy)
     end)
+
 
 
     LastFound = os.time()
@@ -2084,6 +2072,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             end
             if MonResult then
                 LastFound = os.time()
+                BringSetAnchor(MonResult)
                 local h, w = 0, os.time()
                 SetTask('SubTask', '⚔️ Attacking ' .. tostring(MonResult.Name))
                 local w, b = 0, os.time()
@@ -2103,6 +2092,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                     if CaculateDistance(p.Position + Vector3.new(0, 35, 0)) < 150 then
                         y = D and D()
                         CombatController.Grab(L or '')
+                        BringKeepAlive()
                         if MonResult.Name ~= "Core" then
                             if ScriptStorage.PlayerData.Level > 100 and w >= CombatController.MAX_ATTACK_DURATION_2 and C.Health - C.MaxHealth == 0 then
                                 SetTask('SubTask', 'Hop Server - Mob Health Unchanged ( ' .. C.Health .. ' / ' .. C.MaxHealth .. ')')
