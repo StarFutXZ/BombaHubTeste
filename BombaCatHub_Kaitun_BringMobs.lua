@@ -62,7 +62,7 @@ Config = {
     AutoSea3 = true,
     AutoRaidIce_TargetFragments = 5000,
 }
-print("[Tiro] Script da duoc nap, dang cho game load...")
+print("[BombaCat Hub] Script carregado, a esperar o jogo carregar...")
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -72,7 +72,7 @@ local CoreGui = game:GetService("CoreGui")
 
 local lp = Players.LocalPlayer
 
-print("[Main] Bắt đầu Tiro Kaitun Modulo v2.2...")
+print("[BombaCat Hub] A iniciar...")
 timeee = os.time()
 local W_angle = 30
 local lastChange = tick()
@@ -827,10 +827,10 @@ function hoangtuveu()
     discordLabel.AutomaticSize = Enum.AutomaticSize.XY
     discordLabel.Size = UDim2.new(0, 0, 0, 0)
     discordLabel.BackgroundTransparency = 1
-    discordLabel.Text = "https://discord.gg/KrEPeAtjn"
+    discordLabel.Text = "BombaCat Hub"
     discordLabel.TextSize = 13
     discordLabel.Font = Enum.Font.Highway
-    discordLabel.TextColor3 = Color3.fromRGB(255, 45, 155)
+    discordLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
     discordLabel.TextXAlignment = Enum.TextXAlignment.Center
 
     local frame = Instance.new("Frame")
@@ -839,7 +839,7 @@ function hoangtuveu()
     frame.LayoutOrder = 2
     frame.AutomaticSize = Enum.AutomaticSize.XY
     frame.Size = UDim2.new(0, 0, 0, 0)
-    frame.BackgroundColor3 = Color3.fromRGB(38, 5, 25)
+    frame.BackgroundColor3 = Color3.fromRGB(38, 30, 5)
     frame.BackgroundTransparency = 0.25
     frame.BorderSizePixel = 0
 
@@ -852,7 +852,7 @@ function hoangtuveu()
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local stroke = Instance.new("UIStroke", frame)
-    stroke.Color = Color3.fromRGB(255, 45, 155)
+    stroke.Color = Color3.fromRGB(255, 200, 0)
     stroke.Thickness = 1.5
     stroke.Transparency = 0
 
@@ -884,7 +884,7 @@ function hoangtuveu()
     taskLabel.Text = "Status :"
     taskLabel.TextSize = 14
     taskLabel.Font = Enum.Font.Ubuntu
-    taskLabel.TextColor3 = Color3.fromRGB(255, 170, 220)
+    taskLabel.TextColor3 = Color3.fromRGB(255, 230, 150)
     taskLabel.TextXAlignment = Enum.TextXAlignment.Left
 
     local subTaskLabel = Instance.new("TextLabel")
@@ -897,7 +897,7 @@ function hoangtuveu()
     subTaskLabel.Text = "Sub Task :"
     subTaskLabel.TextSize = 13
     subTaskLabel.Font = Enum.Font.Ubuntu
-    subTaskLabel.TextColor3 = Color3.fromRGB(255, 170, 220)
+    subTaskLabel.TextColor3 = Color3.fromRGB(255, 230, 150)
     subTaskLabel.TextTransparency = 0
     subTaskLabel.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -2195,7 +2195,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                 end
             elseif not X then
                 if (os.time() - LastFound) > 200 then
-                    alert('MeyyHub', 'Error while farming, rejoin')
+                    alert('BombaCat Hub', 'Error while farming, rejoin')
                     game:GetService("ReplicatedStorage").__ServerBrowser:InvokeServer("teleport", game.JobId)
                     return
                 end
@@ -5639,7 +5639,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     k:RegisterNotifyListener("scroll reacts", function() DoneCdkTick = os.time() end)
     k:RegisterNotifyListener("elite", function()
         FunctionsHandler.Yama:Set('EliteCount', Remotes.CommF_:InvokeServer("EliteHunter", "Progress"))
-        alert("[MeyyHub ] ", "Elite defeated: " .. tostring(FunctionsHandler.Yama:Get("EliteCount") or 'n/a'))
+        alert("[BombaCat Hub] ", "Elite defeated: " .. tostring(FunctionsHandler.Yama:Get("EliteCount") or 'n/a'))
     end)
     k:RegisterNotifyListener('the raid with', function()
         if ScriptStorage.PlayerData.Level < MaxLevel then return end
@@ -6210,7 +6210,7 @@ task.spawn(function()
     end)
 
     for _, container in ipairs({CoreGui, PlayerGui}) do
-        for _, name in ipairs({"Noguchi Status", "Noguchi Ui", "Noguchi Toggle"}) do
+        for _, name in ipairs({"Noguchi Status", "Noguchi Ui", "Noguchi Toggle", "BombaCat Ui", "BombaCat Toggle"}) do
             pcall(function()
                 local old = container:FindFirstChild(name)
                 if old then old:Destroy() end
@@ -6220,7 +6220,7 @@ task.spawn(function()
 
     local UI = {}
     local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "Noguchi Ui"
+    ScreenGui.Name = "BombaCat Ui"
     ScreenGui.ResetOnSpawn = false
     ScreenGui.DisplayOrder = 50
     ScreenGui.IgnoreGuiInset = true
@@ -6250,8 +6250,8 @@ task.spawn(function()
 
     local UIGradient = Instance.new("UIGradient", UIStroke)
     UIGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(204, 52, 235)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(97, 0, 117))
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 221, 0)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(153, 115, 0))
     })
 
     local function makeLabel(text, pos, size)
@@ -6268,27 +6268,27 @@ task.spawn(function()
         return lbl
     end
 
-    local TextLabel = makeLabel("Hex Hub", UDim2.new(0.4, 0, 0.05, 0))
+    local TextLabel = makeLabel("BombaCat Hub", UDim2.new(0.4, 0, 0.05, 0))
     local UIGradient2 = Instance.new("UIGradient", TextLabel)
     UIGradient2.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(204, 52, 235)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(97, 0, 117))
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 221, 0)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(153, 115, 0))
     })
 
     local TextLabel2 = makeLabel(" Account Stats ", UDim2.new(0.2, 0, 0.25, 0), UDim2.new(0, 150, 0, 18))
     TextLabel2.TextSize = 18
     local UIGradient3 = Instance.new("UIGradient", TextLabel2)
     UIGradient3.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(204, 52, 235)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(97, 0, 117))
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 221, 0)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(153, 115, 0))
     })
 
     local TextLabel3 = makeLabel(" Account Items ", UDim2.new(0.75, 0, 0.25, 0), UDim2.new(0, 150, 0, 18))
     TextLabel3.TextSize = 18
     local UIGradient4 = Instance.new("UIGradient", TextLabel3)
     UIGradient4.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(204, 52, 235)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(97, 0, 117))
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 221, 0)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(153, 115, 0))
     })
 
     UI.Level = makeLabel("Level: 0", UDim2.new(0.07, 0, 0.35, 0))
@@ -6357,12 +6357,12 @@ task.spawn(function()
     end
 
     local ToggleBtn = Instance.new("ImageButton")
-    ToggleBtn.Name = "Noguchi Toggle"
+    ToggleBtn.Name = "BombaCat Toggle"
     ToggleBtn.Size = UDim2.new(0, 55, 0, 55)
     ToggleBtn.AnchorPoint = Vector2.new(0, 0.5)
     ToggleBtn.Position = UDim2.new(0, 15, 0.5, 0)
     ToggleBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    ToggleBtn.Image = "rbxthumb://type=Asset&id=100653737935048&w=420&h=420"
+    ToggleBtn.Image = "rbxthumb://type=Asset&id=113347835552896&w=420&h=420"
     ToggleBtn.ZIndex = 100
     ToggleBtn.Draggable = true
     ToggleBtn.Active = true
