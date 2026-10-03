@@ -2212,9 +2212,12 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
 
     local _bringSimTick = 0
     local function _isMine(part)
+        -- Network ownership APIs differ between executors. Treat errors as
+        -- non-blocking and do not reject the whole Bring cycle on a false/unknown result.
         if not isnetworkowner then return true end
         local ok, res = pcall(isnetworkowner, part)
-        return (not ok) or res
+        if not ok or res == nil then return true end
+        return res == true
     end
 
     BringEnemy = function()
@@ -2223,7 +2226,9 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         if not anchor or anchor.Parent ~= workspace:FindFirstChild("Enemies") then return end  -- ignora templates do ReplicatedStorage
         -- Prisoner NPCs: nunca usar como âncora — mas só na ilha da prisão.
         if _isPrisonerBlocked(anchor.Name) then return end
-        if tick() - BringAnchorTick > 0.6 then return end          -- combate já acabou
+        -- Allow a slightly wider scheduling gap; the attack loop refreshes this
+        -- timestamp while the target remains alive.
+        if tick() - BringAnchorTick > 2.0 then return end
         local aHum  = anchor:FindFirstChildOfClass("Humanoid")
         local aRoot = anchor:FindFirstChild("HumanoidRootPart")
         if not aHum or aHum.Health <= 0 or not aRoot then return end
@@ -2257,21 +2262,25 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                 local hum  = v:FindFirstChildOfClass("Humanoid")
                 local root = v:FindFirstChild("HumanoidRootPart")
                 if hum and root and hum.Health > 0
-                   and (root.Position - aPos).Magnitude <= radius
-                   and _isMine(root) then
+                   and (root.Position - aPos).Magnitude <= radius then
+                    -- Do not let a transient network-ownership check prevent all
+                    -- attempts to bring a valid farm target. Protect per-NPC writes
+                    -- so one rejected property does not stop the remaining NPCs.
                     pulled = pulled + 1
-                    if (root.Position - aPos).Magnitude > 2 then
-                        root.CFrame = target
-                    end
-                    root.CanCollide = false
-                    root.AssemblyLinearVelocity  = Vector3.zero
-                    root.AssemblyAngularVelocity = Vector3.zero
-                    hum.WalkSpeed = 0
-                    hum.JumpPower = 0
-                    hum.AutoRotate = false
-                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
-                    local head = v:FindFirstChild("Head")
-                    if head then head.CanCollide = false end
+                    pcall(function()
+                        if (root.Position - aPos).Magnitude > 2 then
+                            root.CFrame = target
+                        end
+                        root.CanCollide = false
+                        root.AssemblyLinearVelocity  = Vector3.zero
+                        root.AssemblyAngularVelocity = Vector3.zero
+                        hum.WalkSpeed = 0
+                        hum.JumpPower = 0
+                        hum.AutoRotate = false
+                        hum:ChangeState(Enum.HumanoidStateType.Physics)
+                        local head = v:FindFirstChild("Head")
+                        if head then head.CanCollide = false end
+                    end)
                 end
             end
         end
@@ -2427,6 +2436,11 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                     if not C or C.Health <= 0 then
                         if MonResult.Name == "Don Swan" then Storage:Set("SwanDefeated", true) end
                         break
+                    end
+                    -- Keep the Bring anchor alive throughout approach and attack,
+                    -- not only after reaching the 150-stud combat radius.
+                    if MonResult.Parent == workspace:FindFirstChild("Enemies") then
+                        BringKeepAlive()
                     end
                     TweenController.Create(CaculateCircreDirection(p.CFrame) + Vector3.new(0, 35, 0))
                     if CaculateDistance(p.Position + Vector3.new(0, 35, 0)) < 150 then
