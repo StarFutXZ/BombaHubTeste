@@ -48,6 +48,9 @@ Config = {
     },
     AutoKen = true,
     BringMobs = true,
+    -- Bring mobs from across nearby islands, but only names in the active farm target list.
+    BringRadius = 3000,
+    BringMaxMobs = 50,
     PanicMode = {
         Enabled          = true,
         LowHealthPercent = 20,
@@ -1969,11 +1972,11 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     -- * Anchor = o mob com que o ataque começou (BringSetAnchor).
     --   Mantém-se fixo até esse mob morrer / o combate acabar; depois
     --   o próximo mob atacado passa a ser o novo anchor.
-    -- * Só puxa mobs do MESMO NOME do anchor, dentro de BringRadius do anchor.
+    -- * Só puxa nomes presentes no filtro do farm ativo; fallback: nome do anchor.
+    -- * BringRadius aumentado para alcançar NPCs de ilhas próximas/distantes.
     -- * Corre no Heartbeat (cada frame) para os mobs não "fugirem" entre updates.
     -- * Só mexe em mobs de que somos network owner (senão não replica).
-    -- * Config.BringMobs liga/desliga. Config.BringRadius (opcional, def. 350),
-    --   Config.BringMaxMobs (opcional, def. 25).
+    -- * Config.BringMobs liga/desliga. BringRadius default 3000, BringMaxMobs default 50.
     -- ============================================================
     BringAnchor     = nil   -- Model do 1.º mob atacado
     BringAnchorTick = 0     -- atualizado pelo loop de ataque (auto-limpa ao sair)
@@ -2034,15 +2037,20 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             pcall(function() sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", math.huge) end)
         end
 
-        local radius  = Config.BringRadius or 350
-        local maxPull = Config.BringMaxMobs or 25
+        local radius  = Config.BringRadius or 3000
+        local maxPull = Config.BringMaxMobs or 50
         local target  = aRoot.CFrame
         local aPos    = aRoot.Position
         local pulled  = 0
+        -- Use the names passed to the current CombatController.Attack call.
+        -- If that short-lived filter is unavailable, fall back to the anchor's name.
+        local activeNames = AttackFilterNames
+        local filterFresh = activeNames and (tick() - (AttackFilterTick or 0)) <= 1.5
 
         for _, v in ipairs(folder:GetChildren()) do
             if pulled >= maxPull then break end
-            if v ~= anchor and v.Name == anchor.Name then
+            local isFarmTarget = filterFresh and activeNames[v.Name] or v.Name == anchor.Name
+            if v ~= anchor and isFarmTarget then
                 local hum  = v:FindFirstChildOfClass("Humanoid")
                 local root = v:FindFirstChild("HumanoidRootPart")
                 if hum and root and hum.Health > 0
