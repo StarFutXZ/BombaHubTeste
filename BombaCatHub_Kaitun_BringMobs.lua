@@ -1883,6 +1883,55 @@ end
         return pos.X > 40000
     end
 
+    -- ============================================================
+    -- [FIXED v5] SAÍDA DA UNDERWATER CITY PELO PORTAL
+    -- A saída certa é o portal azul no centro da cúpula (coordenadas da tabela
+    -- Portals do script). requestEntrance só funciona junto a esse portal; o
+    -- destino é o Whirlpool. Antes o script voava ~57 000 studs em linha reta.
+    -- Mesmo esquema do Whirlpool: voa ao portal, tenta até 6x (alternando 2
+    -- pontos), confirma a saída (x <= 40000); se falhar recua 60s para o voo antigo.
+    -- ============================================================
+    local UWX = {attempts = 0, lastTry = 0, fallbackUntil = 0, step = 0}
+    local UWX_ENTRIES = {
+        Vector3.new(61163.8515625, 11.759522438049316, 1819.7841796875),  -- tabela Portals
+        Vector3.new(61164, 5, 1820),                                      -- "Underwater City" (ilhas)
+    }
+    local UWX_DEST = Vector3.new(3876.280517578125, 35.10614013671875, -1939.3201904296875)  -- Whirlpool
+
+    -- true = tratado aqui (não seguir); false = deixar o fluxo normal continuar
+    function TweenController.GoToCityExit()
+        local char = game.Players.LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return true end
+        if not Config.WhirlpoolNoFallback and os.time() < UWX.fallbackUntil then return false end
+
+        local entry = UWX_ENTRIES[(UWX.step % #UWX_ENTRIES) + 1]
+        pcall(function() SetTask("SubTask", "Portal -> sair da Underwater City") end)
+        FlyCtl.SetGoal(CFrame.new(entry))
+
+        if (hrp.Position - entry).Magnitude > 12 then return true end   -- ainda a caminho
+
+        if tick() - UWX.lastTry < 1.5 then return true end
+        UWX.lastTry = tick()
+        UWX.attempts = UWX.attempts + 1
+        task.spawn(function()
+            pcall(function() Remotes.CommF_:InvokeServer("requestEntrance", UWX_DEST) end)
+        end)
+        task.wait(1)
+
+        if TweenController.InUnderwaterCity(hrp.Position) then
+            UWX.step = UWX.step + 1                     -- tenta o outro ponto do portal
+            if UWX.attempts >= 6 then
+                UWX.attempts = 0
+                UWX.fallbackUntil = os.time() + 60
+                pcall(function() Report("Portal: 6 tentativas sem sair da Underwater City") end)
+            end
+        else
+            UWX.attempts = 0
+        end
+        return true
+    end
+
     -- true = tratado aqui (não seguir); false = deixar o fluxo normal continuar
     function TweenController.GoToWhirlpool()
         local char = game.Players.LocalPlayer.Character
@@ -2004,6 +2053,12 @@ end
             bv.MaxForce = Vector3.new(0, math.huge, 0)
             bv.Velocity = Vector3.zero
             bv.Parent = head
+        end
+        -- [FIXED v5] Sea 1: estamos dentro da Underwater City e o alvo está fora →
+        -- sair primeiro pelo portal do centro da cúpula.
+        if SeaIndex == 1 and TweenController.InUnderwaterCity(hrp.Position)
+           and not TweenController.InUnderwaterCity(a.Position) then
+            if TweenController.GoToCityExit() then return end
         end
         -- [FIXED v4] Sea 1: alvo dentro da Underwater City e ainda não estamos lá →
         -- ir ao Whirlpool (não voar em linha reta para x ~ 61000).
