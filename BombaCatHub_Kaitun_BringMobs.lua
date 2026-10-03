@@ -1872,40 +1872,32 @@ end
         -- nhánh BypassTP (dist>=4000 → đổi spawn point) — không còn dùng
         -- cơ chế bypass qua spawn point nữa, mọi khoảng cách đều tween bình
         -- thường qua block (từ main_red_magic_beta.txt).
-        -- [FIX v2] Sea 1 / Underwater City:
-        -- A referência QuantumOnyx tem um sistema genérico de portais (requestEntrance),
-        -- mas não uma rota dedicada à Underwater City. Aqui usamos a entrada correta e
-        -- interrompemos este tween se a entrada realmente nos deslocar, para o próximo
-        -- ciclo recalcular o destino já a partir da ilha pequena/entrada.
+        -- [FIX v3] Sea 1 / Underwater City: dar prioridade à entrada antes do tween.
+        -- Fishman Warrior/Commando ficam nas coordenadas ~61k; não iniciar voo longo
+        -- no mesmo ciclo em que se tenta requestEntrance.
         if SeaIndex == 1 then
             local underwaterCity = Vector3.new(61164, 5, 1820)
             local entrancePos = Vector3.new(61163.8516, 11.7595, 1819.7842)
             local targetPos = a.Position
             local currentPos = hrp.Position
-            local targetIsUnderwater = (targetPos - underwaterCity).Magnitude < 3000
-            local playerIsFar = (currentPos - underwaterCity).Magnitude > 3000
+            local targetIsUnderwater = (targetPos - underwaterCity).Magnitude < 5000
+            local playerIsFar = (currentPos - underwaterCity).Magnitude > 1200
 
-            if targetIsUnderwater and playerIsFar
-                and (os.clock() - lastUnderwaterEntranceAttempt) >= 8 then
-                lastUnderwaterEntranceAttempt = os.clock()
-                local beforePos = currentPos
-                pcall(function()
-                    Services.ReplicatedStorage.Remotes.CommF_:InvokeServer(
-                        "requestEntrance", entrancePos
-                    )
-                end)
-                task.wait(0.8)
-                character = game.Players.LocalPlayer.Character
-                hrp = character and character:FindFirstChild("HumanoidRootPart")
-                if not hrp then return end
-
-                local moved = (hrp.Position - beforePos).Magnitude
-                local nowNearUnderwater = (hrp.Position - underwaterCity).Magnitude < 3000
-                if moved > 1000 or nowNearUnderwater then
-                    -- Não continues o tween antigo através do mapa; deixa o próximo
-                    -- ciclo selecionar o ponto de farm a partir da nova posição.
-                    return
+            if targetIsUnderwater and playerIsFar then
+                if (os.clock() - lastUnderwaterEntranceAttempt) >= 8 then
+                    lastUnderwaterEntranceAttempt = os.clock()
+                    pcall(function()
+                        Services.ReplicatedStorage:WaitForChild("Remotes")
+                            :WaitForChild("CommF_"):InvokeServer("requestEntrance", entrancePos)
+                    end)
+                    task.wait(1)
+                    character = game.Players.LocalPlayer.Character
+                    hrp = character and character:FindFirstChild("HumanoidRootPart")
+                    if not hrp then return end
                 end
+                -- Não deixar o tween/FlyCtl antigo continuar a atravessar o mapa.
+                -- O próximo ciclo tenta novamente a entrada, respeitando o intervalo.
+                return
             end
         end
 
