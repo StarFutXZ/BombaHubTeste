@@ -49,8 +49,8 @@ Config = {
     AutoKen = true,
     BringMobs = true,
     -- Bring mobs from across nearby islands, but only names in the active farm target list.
-    BringRadius = 800,
-    BringMaxMobs = 30,
+    BringRadius = 3000,
+    BringMaxMobs = 50,
     PanicMode = {
         Enabled          = true,
         LowHealthPercent = 20,
@@ -1976,7 +1976,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     -- * BringRadius aumentado para alcançar NPCs de ilhas próximas/distantes.
     -- * Corre no Heartbeat (cada frame) para os mobs não "fugirem" entre updates.
     -- * Só mexe em mobs de que somos network owner (senão não replica).
-    -- * Config.BringMobs liga/desliga. BringRadius default 800, BringMaxMobs default 30.
+    -- * Config.BringMobs liga/desliga. BringRadius default 3000, BringMaxMobs default 50.
     -- ============================================================
     BringAnchor     = nil   -- Model do 1.º mob atacado
     BringAnchorTick = 0     -- atualizado pelo loop de ataque (auto-limpa ao sair)
@@ -2022,6 +2022,9 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         if not Config.BringMobs then return end
         local anchor = BringAnchor
         if not anchor or anchor.Parent ~= workspace:FindFirstChild("Enemies") then return end  -- ignora templates do ReplicatedStorage
+        -- Prisoner NPCs: nunca usar como âncora do Bring Mobs.
+        -- Isto inclui "Prisoner", "Dangerous Prisoner" e variantes com esse termo.
+        if string.find(string.lower(anchor.Name), "prisoner", 1, true) then return end
         if tick() - BringAnchorTick > 0.6 then return end          -- combate já acabou
         local aHum  = anchor:FindFirstChildOfClass("Humanoid")
         local aRoot = anchor:FindFirstChild("HumanoidRootPart")
@@ -2037,8 +2040,8 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             pcall(function() sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", math.huge) end)
         end
 
-        local radius  = Config.BringRadius or 800
-        local maxPull = Config.BringMaxMobs or 30
+        local radius  = Config.BringRadius or 3000
+        local maxPull = Config.BringMaxMobs or 50
         local target  = aRoot.CFrame
         local aPos    = aRoot.Position
         local pulled  = 0
@@ -2049,8 +2052,10 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
 
         for _, v in ipairs(folder:GetChildren()) do
             if pulled >= maxPull then break end
+            local isPrisoner = string.find(string.lower(v.Name), "prisoner", 1, true) ~= nil
             local isFarmTarget = filterFresh and activeNames[v.Name] or v.Name == anchor.Name
-            if v ~= anchor and isFarmTarget then
+            -- Nunca puxar NPCs de prisão, mesmo que o nome esteja no filtro do farm.
+            if v ~= anchor and not isPrisoner and isFarmTarget then
                 local hum  = v:FindFirstChildOfClass("Humanoid")
                 local root = v:FindFirstChild("HumanoidRootPart")
                 if hum and root and hum.Health > 0
@@ -2412,34 +2417,8 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             end
         end
         if hasAll then
-            SetTask('MainTask', 'Auto Full Melee | ✅ Já tem todos!')
+            SetTask('MainTask', 'Auto Full Melee | ✅ Đã có tất cả!')
             return nil
-        end
-
-        -- If the next missing fighting style is level-locked, do not let
-        -- Auto Full Melee take over the task dispatcher. LevelFarm must
-        -- continue earning XP until the requirement is reached.
-        local level = ScriptStorage.PlayerData.Level or 0
-        local levelRequirements = {
-            {name = "Black Leg", levelReq = 300},
-            {name = "Electro", levelReq = 300},
-            {name = "Fishman Karate", levelReq = 300},
-            {name = "Dragon Claw", levelReq = 300},
-            {name = "Superhuman", levelReq = nil},
-            {name = "Death Step", levelReq = 400},
-            {name = "Sharkman Karate", levelReq = 400},
-            {name = "Electric Claw", levelReq = 400},
-            {name = "Dragon Talon", levelReq = 400},
-            {name = "Godhuman", levelReq = 400},
-        }
-        for _, melee in ipairs(levelRequirements) do
-            if not CheckItem(melee.name) then
-                if melee.levelReq and level < melee.levelReq then
-                    SetTask('MainTask', 'Level Farming | A subir para nível ' .. melee.levelReq .. ' antes de comprar ' .. melee.name)
-                    return nil
-                end
-                break
-            end
         end
         return true
     end)
