@@ -2107,6 +2107,23 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             end
         end
     end
+    -- Detecta o aviso da missao sem excluir todos os NPCs com o mesmo nome.
+    local function IsPrisonerBlocked()
+        local player = game:GetService("Players").LocalPlayer
+        local playerGui = player and player:FindFirstChild("PlayerGui")
+        if not playerGui then return false end
+
+        for _, obj in ipairs(playerGui:GetDescendants()) do
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                local txt = string.lower(obj.Text or "")
+                if string.find(txt, "confront the prisoner before attacking", 1, true) then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    local PrisonerBlockLatched = false
     function Sort1(entity) return entity and entity:FindFirstChild("HumanoidRootPart") and math.floor(CaculateDistance(entity.HumanoidRootPart.CFrame)) end
     function CombatController.Search(names)
         local candidates = {}
@@ -2158,6 +2175,19 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                 local w, b = 0, os.time()
                 while task.wait() do
                     if _G.Stop then return end
+
+                    -- Quando o aviso aparece durante o ataque a este Prisoner,
+                    -- marca apenas esta instancia e volta ao farm. Outros Prisoners
+                    -- com o mesmo nome continuam elegiveis.
+                    local prisonerBlocked = IsPrisonerBlocked()
+                    if not prisonerBlocked then
+                        PrisonerBlockLatched = false
+                    elseif MonResult and MonResult.Name == "Prisoner" and not PrisonerBlockLatched then
+                        MonResult:SetAttribute("FailureCount", 3)
+                        PrisonerBlockLatched = true
+                        return
+                    end
+
                     if ScriptStorage.Tools["Sweet Chalice"] and getsenv(game.ReplicatedStorage.GuideModule)["_G"]["InCombat"] then
                         pcall(function() if TweenInstance then TweenInstance:Cancel() end end) -- [FIXED] không tween về (0,0,0) khi Sweet Chalice InCombat
                         return
