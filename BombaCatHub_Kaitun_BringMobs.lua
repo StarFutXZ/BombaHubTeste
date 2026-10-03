@@ -1903,7 +1903,9 @@ end
         local char = game.Players.LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then return true end
-        if not Config.WhirlpoolNoFallback and os.time() < UWX.fallbackUntil then return false end
+        -- Nunca retomar o voo direto enquanto ainda estamos dentro da cidade.
+        -- Mantém o controlo da saída mesmo se o portal demorar a responder.
+        if os.time() < UWX.fallbackUntil then UWX.fallbackUntil = 0 end
 
         local entry = UWX_ENTRIES[(UWX.step % #UWX_ENTRIES) + 1]
         pcall(function() SetTask("SubTask", "Portal -> sair da Underwater City") end)
@@ -1923,8 +1925,8 @@ end
             UWX.step = UWX.step + 1                     -- tenta o outro ponto do portal
             if UWX.attempts >= 6 then
                 UWX.attempts = 0
-                UWX.fallbackUntil = os.time() + 60
-                pcall(function() Report("Portal: 6 tentativas sem sair da Underwater City") end)
+                UWX.fallbackUntil = 0
+                pcall(function() Report("Portal: ainda dentro da Underwater City; continuo a tentar a saída") end)
             end
         else
             UWX.attempts = 0
