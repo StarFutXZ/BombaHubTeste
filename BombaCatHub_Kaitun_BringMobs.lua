@@ -2142,6 +2142,19 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         AttackFilterTick  = tick()
     end
 
+    -- Prisioneiros: o bring só é bloqueado para NPCs "prisoner" quando o jogador
+    -- está na ilha da prisão (Sea 1). Em qualquer outro sítio funciona normal.
+    local PRISON_CENTER = Vector3.new(4870, 6, 736)
+    local function _onPrisonIsland()
+        if SeaIndex ~= 1 then return false end
+        local c = game.Players.LocalPlayer.Character
+        local r = c and c:FindFirstChild("HumanoidRootPart")
+        return r ~= nil and (r.Position - PRISON_CENTER).Magnitude < 1500
+    end
+    local function _isPrisonerBlocked(name)
+        return string.find(string.lower(name), "prisoner", 1, true) ~= nil and _onPrisonIsland()
+    end
+
     local _bringSimTick = 0
     local function _isMine(part)
         if not isnetworkowner then return true end
@@ -2153,9 +2166,8 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         if not Config.BringMobs then return end
         local anchor = BringAnchor
         if not anchor or anchor.Parent ~= workspace:FindFirstChild("Enemies") then return end  -- ignora templates do ReplicatedStorage
-        -- Prisoner NPCs: nunca usar como âncora do Bring Mobs.
-        -- Isto inclui "Prisoner", "Dangerous Prisoner" e variantes com esse termo.
-        if string.find(string.lower(anchor.Name), "prisoner", 1, true) then return end
+        -- Prisoner NPCs: nunca usar como âncora — mas só na ilha da prisão.
+        if _isPrisonerBlocked(anchor.Name) then return end
         if tick() - BringAnchorTick > 0.6 then return end          -- combate já acabou
         local aHum  = anchor:FindFirstChildOfClass("Humanoid")
         local aRoot = anchor:FindFirstChild("HumanoidRootPart")
@@ -2183,9 +2195,9 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
 
         for _, v in ipairs(folder:GetChildren()) do
             if pulled >= maxPull then break end
-            local isPrisoner = string.find(string.lower(v.Name), "prisoner", 1, true) ~= nil
+            local isPrisoner = _isPrisonerBlocked(v.Name)
             local isFarmTarget = filterFresh and activeNames[v.Name] or v.Name == anchor.Name
-            -- Nunca puxar NPCs de prisão, mesmo que o nome esteja no filtro do farm.
+            -- Na ilha da prisão nunca puxar os prisioneiros, mesmo que o nome esteja no filtro.
             if v ~= anchor and not isPrisoner and isFarmTarget then
                 local hum  = v:FindFirstChildOfClass("Humanoid")
                 local root = v:FindFirstChild("HumanoidRootPart")
@@ -2298,6 +2310,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         sethiddenproperty(game.Players.LocalPlayer, 'SimulationRadius', math.huge)
         h = type(h) == "string" and {h} or (h or {})
         if X then AttackFilterNames = nil else SetAttackFilter(h) end
+        local nameList = h
         for y, L in (h) do
             local b = tostring(L)
             if b == 'Deandre' or b == "Urban" or b == "Diablo" and (os.time() - (LastFire12 or 0)) > 180 then
@@ -2323,13 +2336,31 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                     -- Quando o aviso aparece durante o ataque a este Prisoner,
                     -- marca apenas esta instancia e volta ao farm. Outros Prisoners
                     -- com o mesmo nome continuam elegiveis.
-                    local prisonerBlocked = IsPrisonerBlocked()
-                    if not prisonerBlocked then
-                        PrisonerBlockLatched = false
-                    elseif MonResult and MonResult.Name == "Prisoner" and not PrisonerBlockLatched then
+                    -- [PERF] só verifica quando o alvo é um "Prisoner" e no máximo 4x/s
+                    -- (antes varria o PlayerGui inteiro EM TODOS OS FRAMES, em qualquer mob).
+                    local prisonerBlocked = false
+                    if MonResult and MonResult.Name == "Prisoner" and tick() - (PrisonerCheckTick or 0) > 0.25 then
+                        PrisonerCheckTick = tick()
+                        prisonerBlocked = IsPrisonerBlocked()
+                        if not prisonerBlocked then PrisonerBlockLatched = false end
+                    end
+                    if prisonerBlocked and MonResult and MonResult.Name == "Prisoner" and not PrisonerBlockLatched then
                         MonResult:SetAttribute("FailureCount", 3)
                         PrisonerBlockLatched = true
                         return
+                    end
+
+                    -- [FIXED] se o alvo ainda é o "template" do ReplicatedStorage (os mobs
+                    -- não estavam carregados quando a pesquisa correu), troca para o mob
+                    -- real assim que aparecer — senão o Bring Mobs ficava sem âncora.
+                    if not X and MonResult.Parent == game:GetService("ReplicatedStorage")
+                       and tick() - (ReSearchTick or 0) > 0.5 then
+                        ReSearchTick = tick()
+                        local real = CombatController.Search(nameList)
+                        if real and real.Parent == workspace:FindFirstChild("Enemies") then
+                            MonResult = real
+                            BringSetAnchor(real)
+                        end
                     end
 
                     if ScriptStorage.Tools["Sweet Chalice"] and getsenv(game.ReplicatedStorage.GuideModule)["_G"]["InCombat"] then
