@@ -2248,6 +2248,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         local target  = aRoot.CFrame
         local aPos    = aRoot.Position
         local pulled  = 0
+        local notOwner = 0
         -- Use the names passed to the current CombatController.Attack call.
         -- If that short-lived filter is unavailable, fall back to the anchor's name.
         local activeNames = AttackFilterNames
@@ -2263,9 +2264,14 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                 local root = v:FindFirstChild("HumanoidRootPart")
                 if hum and root and hum.Health > 0
                    and (root.Position - aPos).Magnitude <= radius then
-                    -- Do not let a transient network-ownership check prevent all
-                    -- attempts to bring a valid farm target. Protect per-NPC writes
-                    -- so one rejected property does not stop the remaining NPCs.
+                    -- [FIXED v7] Só puxa mobs de que somos network owner. Um mob que o
+                    -- servidor não nos entregou só muda de sítio NO TEU ECRÃ (fantasma):
+                    -- parece "puxado", mas no servidor continua longe, por isso os hits
+                    -- falham, o script marca-o como "falhado" (FailureCount) e fica sem
+                    -- alvos = "puxa todos mas só mata 1 e fica parado".
+                    if not _isMine(root) then
+                        notOwner = notOwner + 1
+                    else
                     pulled = pulled + 1
                     pcall(function()
                         -- Move only the NPC root. Avoid forcing Humanoid into Physics
@@ -2280,9 +2286,12 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                         local head = v:FindFirstChild("Head")
                         if head then head.CanCollide = false end
                     end)
+                    end
                 end
             end
         end
+        BringDbgText = "Bring: " .. pulled .. " puxados, " .. notOwner .. " sem owner"
+        BringDbgTick = tick()
     end
 
     game:GetService("RunService").Heartbeat:Connect(function()
@@ -2347,8 +2356,15 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     function CombatController.Search(names)
         local candidates = {}
         local anyFound = false
+        -- [FIXED] GetMonAsSortedRange() mistura os mobs reais com os "templates" do
+        -- ReplicatedStorage e ordena só por distância: se o template estivesse mais
+        -- perto que qualquer mob vivo, ele era escolhido e o script ficava a voar
+        -- ao pé do ponto de spawn "a atacar" sem nada para matar. Agora só os mobs
+        -- reais (workspace.Enemies) contam; o template fica como último recurso
+        -- (abaixo), para ir até ao spawn quando não há mobs vivos.
+        local enemiesFolder = workspace:FindFirstChild("Enemies")
         for _, entity in GetMonAsSortedRange() do
-            if table.find(names, entity.Name) and entity:FindFirstChild("Humanoid") and entity.Humanoid.Health > 0 then
+            if entity.Parent == enemiesFolder and table.find(names, entity.Name) and entity:FindFirstChild("Humanoid") and entity.Humanoid.Health > 0 then
                 if (entity:GetAttribute('FailureCount') or 0) < 3 then
                     anyFound = true
                     table.insert(candidates, entity)
@@ -2359,6 +2375,19 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         if anyFound then
             local best = candidates[1]
             return best
+        end
+        -- [FIXED v7] anti-stuck: se TODOS os mobs deste nome foram marcados como
+        -- falhados (FailureCount>=3), o script ficava parado para sempre. Limpa a
+        -- marca de 10 em 10 s (exceto "Prisoner": esses são marcados de propósito).
+        if enemiesFolder and tick() - (FailResetTick or 0) > 10 then
+            FailResetTick = tick()
+            for _, entity in ipairs(enemiesFolder:GetChildren()) do
+                if entity.Name ~= "Prisoner" and table.find(names, entity.Name)
+                   and (entity:GetAttribute('FailureCount') or 0) >= 3 then
+                    entity:SetAttribute('FailureCount', 0)
+                    entity:SetAttribute('IgnoreGrab', nil)
+                end
+            end
         end
         for _, npcName in names do
             local npc = game.ReplicatedStorage:FindFirstChild(npcName)
@@ -2424,6 +2453,15 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                             MonResult = real
                             BringSetAnchor(real)
                         end
+                    end
+
+                    if not X and tick() - (AtkDbgTick or 0) > 1 then
+                        AtkDbgTick = tick()
+                        pcall(function()
+                            local real = MonResult.Parent == workspace:FindFirstChild("Enemies")
+                            local dbg = (BringDbgText and tick() - (BringDbgTick or 0) < 2) and (' | ' .. BringDbgText) or ''
+                            SetTask('SubTask', '⚔️ Attacking ' .. tostring(MonResult.Name) .. (real and '' or ' [à espera de mob no spawn]') .. dbg)
+                        end)
                     end
 
                     if ScriptStorage.Tools["Sweet Chalice"] and getsenv(game.ReplicatedStorage.GuideModule)["_G"]["InCombat"] then
