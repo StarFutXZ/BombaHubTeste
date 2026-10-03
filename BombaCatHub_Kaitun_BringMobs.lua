@@ -1921,7 +1921,10 @@ end
         bladehits = {}
         for X, X in pairs(workspace.Enemies:GetChildren()) do
             if X:FindFirstChild('Humanoid') and X:FindFirstChild('HumanoidRootPart') and X.Humanoid.Health > 0 and (X.HumanoidRootPart.Position - game.Players.LocalPlayer.Character.HumanoidRootPart.Position).Magnitude <= 65 then
-                table.insert(bladehits, X)
+                local f = AttackFilterNames
+                if not f or (tick() - (AttackFilterTick or 0)) > 1.5 or f[X.Name] then
+                    table.insert(bladehits, X)
+                end
             end
         end
         return bladehits
@@ -1941,7 +1944,9 @@ end
     function h:Attack()
         local X = {}
         for y, y in pairs(GetAllBladeHits()) do table.insert(X, y) end
-        for y, y in pairs(Getplayerhit()) do table.insert(X, y) end
+        if Config.AttackPlayers == true then
+            for y, y in pairs(Getplayerhit()) do table.insert(X, y) end
+        end
         if #X == 0 then return end
         local y = {[1] = nil, [2] = {}, [4] = "078da5141"}
         for L, L in pairs(X) do
@@ -1979,6 +1984,28 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     end
     function BringKeepAlive()
         BringAnchorTick = tick()
+        AttackFilterTick = tick()
+    end
+
+    -- ============================================================
+    -- [NEW] FILTRO DE ALVOS DO FAST ATTACK — só mobs da missão
+    -- Antes o fast attack acertava em TODOS os mobs a <=65 studs (e em
+    -- jogadores), por isso batia em NPCs que não eram da quest (ex.:
+    -- "Dangerous Prisoner" ao lado dos "Prisoner"). Agora só acerta nos
+    -- mobs cujo nome foi passado a CombatController.Attack (ex.: Q.Mon).
+    -- O filtro expira 1.5s depois do último ataque; fora do loop de
+    -- ataque (outras funções que usam _G.FastAttack) o comportamento
+    -- antigo mantém-se. Jogadores: só com Config.AttackPlayers = true.
+    -- ============================================================
+    AttackFilterNames = nil
+    AttackFilterTick  = 0
+    function SetAttackFilter(names)
+        local set = {}
+        local ok = pcall(function()
+            for _, n in pairs(names) do set[tostring(n)] = true end
+        end)
+        AttackFilterNames = (ok and next(set)) and set or nil
+        AttackFilterTick  = tick()
     end
 
     local _bringSimTick = 0
@@ -2109,6 +2136,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         end
         sethiddenproperty(game.Players.LocalPlayer, 'SimulationRadius', math.huge)
         h = type(h) == "string" and {h} or (h or {})
+        if X then AttackFilterNames = nil else SetAttackFilter(h) end
         for y, L in (h) do
             local b = tostring(L)
             if b == 'Deandre' or b == "Urban" or b == "Diablo" and (os.time() - (LastFire12 or 0)) > 180 then
