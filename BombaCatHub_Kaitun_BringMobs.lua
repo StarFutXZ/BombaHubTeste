@@ -2411,7 +2411,15 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         local enemiesFolder = workspace:FindFirstChild("Enemies")
         for _, entity in GetMonAsSortedRange() do
             if entity.Parent == enemiesFolder and table.find(names, entity.Name) and entity:FindFirstChild("Humanoid") and entity.Humanoid.Health > 0 then
-                if (entity:GetAttribute('FailureCount') or 0) < 3 then
+                -- Shanda: não deixar FailureCount antigo excluir os últimos NPCs vivos.
+                -- Ao restarem poucos mobs, os restantes podem herdar falhas de tentativas
+                -- anteriores; continuar a selecioná-los evita cair no template do spawn.
+                if entity.Name == "Shanda" then
+                    entity:SetAttribute("FailureCount", 0)
+                    entity:SetAttribute("IgnoreGrab", nil)
+                    anyFound = true
+                    table.insert(candidates, entity)
+                elseif (entity:GetAttribute('FailureCount') or 0) < 3 then
                     anyFound = true
                     table.insert(candidates, entity)
                 end
@@ -3715,9 +3723,13 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             local foundMob = false
             for _, folder in ipairs({workspace.Enemies, game.ReplicatedStorage}) do
                 for _, v2 in ipairs(folder:GetChildren()) do
-                    if v2.Name == "Shanda" and v2:IsA("Model") then
+                    if folder == workspace.Enemies and v2.Name == "Shanda" and v2:IsA("Model") then
                         local hum = v2:FindFirstChildOfClass("Humanoid")
-                        if hum and hum.Health > 0 then
+                        local root = v2:FindFirstChild("HumanoidRootPart")
+                        if hum and root and hum.Health > 0 then
+                            -- Limpa o bloqueio antigo apenas neste NPC da missão.
+                            v2:SetAttribute("FailureCount", 0)
+                            v2:SetAttribute("IgnoreGrab", nil)
                             foundMob = true
                             SetTask("SubTask", "⚔️ Attacking Shanda")
                             CombatController.Attack("Shanda")
