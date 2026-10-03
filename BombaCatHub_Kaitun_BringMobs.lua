@@ -6810,35 +6810,47 @@ task.spawn(function()
         end
     end)
 
-    -- AUTO GACHA FRUIT (Zioles): usa a chamada Cousin/Buy já utilizada pelo hub.
-    -- A tentativa anterior via GachaNetworkRF dependia de RequirementsMet, campo
-    -- que pode não ser devolvido pelo servidor; por isso nunca chegava a comprar.
+    -- AUTO GACHA FRUIT (Zioles): usar o remote específico do Gacha.
+    -- "Cousin", "Buy" é legado e não é a chamada correta para o Gacha atual.
     getgenv().AutoRandomFruit = true
     Config.Extras.AutoGachaFruit = true
 
-    local function GachaCall(ctx)
-        local commF = game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):FindFirstChild("CommF_")
-        if not commF then return false, "Remote CommF_ não encontrado" end
+    local GachaRF
+    local function getGachaRF()
+        if GachaRF and GachaRF.Parent then return GachaRF end
         local ok, result = pcall(function()
-            if ctx == "Check" then
-                return commF:InvokeServer("Cousin", "Check")
-            end
-            return commF:InvokeServer("Cousin", "Buy")
+            local modules = game:GetService("ReplicatedStorage"):WaitForChild("Modules", 10)
+            local net = modules and modules:WaitForChild("Net", 10)
+            return net and net:WaitForChild("RF/GachaNetworkRF", 10)
+        end)
+        if ok then GachaRF = result end
+        return GachaRF
+    end
+
+    local function GachaCall(ctx)
+        local rf = getGachaRF()
+        if not rf then return false, "RF/GachaNetworkRF não encontrado" end
+        local ok, result = pcall(function()
+            return rf:InvokeServer({
+                SpokeNPC = "Blox Fruit Gacha",
+                Context = ctx,
+                BoxName = "ZiolesGacha",
+            })
         end)
         if not ok then return false, tostring(result) end
         return true, result
     end
 
     task.spawn(function()
-        -- O servidor valida nível, Beli e cooldown; tentar a cada 30 s permite
-        -- que a compra aconteça assim que o Gacha estiver disponível.
+        -- Não bloquear a compra com um campo RequirementsMet que pode não existir.
+        -- Tenta Purchase diretamente; o próprio servidor valida dinheiro, nível e cooldown.
         while task.wait(30) do
             if getgenv().AutoRandomFruit and Config.Extras.AutoGachaFruit then
                 local ok, result = GachaCall("Purchase")
                 if ok then
-                    print("[Gacha] Resposta do servidor: " .. tostring(result))
+                    print("[Gacha] Resposta do servidor:", tostring(result))
                 else
-                    warn("[Gacha] Falha ao tentar girar: " .. tostring(result))
+                    warn("[Gacha] Compra falhou:", tostring(result))
                 end
             end
         end
@@ -6850,6 +6862,7 @@ task.spawn(function()
         Spin  = function() return GachaCall("Purchase") end,
         Check = function() return GachaCall("Check") end,
     }
+
 end)
 
 --============================================================
