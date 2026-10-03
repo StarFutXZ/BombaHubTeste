@@ -49,8 +49,8 @@ Config = {
     AutoKen = true,
     BringMobs = true,
     -- Bring mobs from across nearby islands, but only names in the active farm target list.
-    BringRadius = 3000,
-    BringMaxMobs = 50,
+    BringRadius = 800,
+    BringMaxMobs = 30,
     PanicMode = {
         Enabled          = true,
         LowHealthPercent = 20,
@@ -1973,10 +1973,10 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     --   Mantém-se fixo até esse mob morrer / o combate acabar; depois
     --   o próximo mob atacado passa a ser o novo anchor.
     -- * Só puxa nomes presentes no filtro do farm ativo; fallback: nome do anchor.
-    -- * BringRadius aumentado para alcançar NPCs de ilhas próximas/distantes.
+    -- * Raio moderado para evitar puxar NPCs demasiado distantes.
     -- * Corre no Heartbeat (cada frame) para os mobs não "fugirem" entre updates.
     -- * Só mexe em mobs de que somos network owner (senão não replica).
-    -- * Config.BringMobs liga/desliga. BringRadius default 3000, BringMaxMobs default 50.
+    -- * Config.BringMobs liga/desliga. BringRadius default 800, BringMaxMobs default 30.
     -- ============================================================
     BringAnchor     = nil   -- Model do 1.º mob atacado
     BringAnchorTick = 0     -- atualizado pelo loop de ataque (auto-limpa ao sair)
@@ -2402,7 +2402,10 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
 
     FunctionsHandler.MeleesController:RegisterMethod("Refresh", function()
         if not Config.Items.AutoFullyMelees or not Config.Melee.AutoBuy then return nil end
-        if ScriptStorage.PlayerData.Level < 200 then return nil end
+        -- Até ao nível 300, as primeiras melee ainda estão bloqueadas por nível.
+        -- Não ativar este controlador antes disso: deixa o dispatcher executar
+        -- LevelFarm normalmente em vez de ficar preso em "Cần Player Level 300".
+        if (ScriptStorage.PlayerData.Level or 0) < 300 then return nil end
         -- [FIXED] Bỏ "if _G.Level then return nil end" — đây là khóa VĨNH VIỄN,
         -- một khi thiếu tiền 1 lần là MeleesController tắt luôn mãi mãi vì
         -- không có chỗ nào khác set lại _G.Level = false. Bỏ hẳn cờ này,
