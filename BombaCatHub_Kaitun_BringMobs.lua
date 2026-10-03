@@ -2111,7 +2111,13 @@ end
         for X, X in pairs(workspace.Enemies:GetChildren()) do
             if X:FindFirstChild('Humanoid') and X:FindFirstChild('HumanoidRootPart') and X.Humanoid.Health > 0 and (X.HumanoidRootPart.Position - game.Players.LocalPlayer.Character.HumanoidRootPart.Position).Magnitude <= 65 then
                 local f = AttackFilterNames
-                if not f or (tick() - (AttackFilterTick or 0)) > 1.5 or f[X.Name] then
+                -- [FIXED v9] mob que o bring acabou de mover e ainda não foi confirmado pelo
+                -- servidor (estado "probe") está num sítio FALSO só no teu cliente. Se for
+                -- incluído no RegisterHit, o servidor vê um alvo fora de alcance e pode
+                -- rejeitar o pacote inteiro (ninguém leva dano) — por isso fica de fora.
+                local bp = BringProbe and BringProbe[X]
+                local unverified = bp ~= nil and bp.state == "probe"
+                if (not unverified) and (not f or (tick() - (AttackFilterTick or 0)) > 1.5 or f[X.Name]) then
                     table.insert(bladehits, X)
                 end
             end
@@ -2211,7 +2217,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     end
 
     -- [v8] teste empírico de ownership: estado por mob = probe / ok / ghost
-    local _bringProbe = setmetatable({}, {__mode = "k"})
+    BringProbe = setmetatable({}, {__mode = "k"})   -- global: o fast attack também a lê
     local function _isMineStrict(part)
         if not isnetworkowner then return false end
         local ok, res = pcall(isnetworkowner, part)
@@ -2278,12 +2284,12 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                     -- "fantasma" (só se mexia no teu ecrã): deixa de ser puxado durante 8s e
                     -- depois volta a ser testado. Fantasmas = mobs que o servidor não te deu.
                     local now  = tick()
-                    local st   = _bringProbe[v]
+                    local st   = BringProbe[v]
                     local dist = (root.Position - aPos).Magnitude
                     local skip = false
                     if st and st.state == "ghost" then
                         if now >= st.untilT then
-                            _bringProbe[v] = nil
+                            BringProbe[v] = nil
                             st = nil
                         else
                             skip = true
@@ -2293,7 +2299,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                     if not skip then
                         if not st then
                             st = {t0 = now, state = "probe", bad = 0}
-                            _bringProbe[v] = st
+                            BringProbe[v] = st
                         end
                         if st.state == "probe" then
                             if now - st.t0 > 0.35 then
