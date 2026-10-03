@@ -6361,7 +6361,8 @@ task.spawn(function()
     ToggleBtn.Size = UDim2.new(0, 55, 0, 55)
     ToggleBtn.AnchorPoint = Vector2.new(0, 0.5)
     ToggleBtn.Position = UDim2.new(0, 15, 0.5, 0)
-    ToggleBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    ToggleBtn.BackgroundColor3 = Color3.new(0, 0, 0)
+    ToggleBtn.BackgroundTransparency = 0.5  -- preto transparente, igual ao fundo da interface
     ToggleBtn.Image = "rbxthumb://type=Asset&id=113347835552896&w=420&h=420"
     ToggleBtn.ZIndex = 100
     ToggleBtn.Draggable = true
@@ -6369,7 +6370,7 @@ task.spawn(function()
         ToggleBtn.Parent = ScreenGui
     Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0)
     local BtnStroke = Instance.new("UIStroke", ToggleBtn)
-    BtnStroke.Color = Color3.fromRGB(255, 255, 255)
+    BtnStroke.Color = Color3.fromRGB(255, 200, 0)  -- contorno amarelo
     BtnStroke.Thickness = 2.5
     BtnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     ToggleBtn.MouseButton1Click:Connect(function()
