@@ -6810,53 +6810,35 @@ task.spawn(function()
         end
     end)
 
-    -- AUTO GACHA FRUIT (Zioles): tenta automaticamente quando o jogo permitir.
-    -- Isto compra uma fruta física aleatória; não equipa uma fruta do inventário.
-    Config.Extras.AutoGachaFruit = true
+    -- AUTO GACHA FRUIT (Zioles): usa a chamada Cousin/Buy já utilizada pelo hub.
+    -- A tentativa anterior via GachaNetworkRF dependia de RequirementsMet, campo
+    -- que pode não ser devolvido pelo servidor; por isso nunca chegava a comprar.
     getgenv().AutoRandomFruit = true
-
-    local GachaRF
-    local function getGachaRF()
-        if GachaRF and GachaRF.Parent then return GachaRF end
-        GachaRF = nil
-        local ok, rf = pcall(function()
-            local modules = game:GetService("ReplicatedStorage"):WaitForChild("Modules", 10)
-            local net = modules and modules:WaitForChild("Net", 10)
-            return net and net:WaitForChild("RF/GachaNetworkRF", 10)
-        end)
-        if ok then GachaRF = rf end
-        return GachaRF
-    end
+    Config.Extras.AutoGachaFruit = true
 
     local function GachaCall(ctx)
-        local rf = getGachaRF()
-        if not rf then return false, "GachaNetworkRF não encontrado" end
+        local commF = game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):FindFirstChild("CommF_")
+        if not commF then return false, "Remote CommF_ não encontrado" end
         local ok, result = pcall(function()
-            return rf:InvokeServer({
-                SpokeNPC = "Blox Fruit Gacha",
-                Context = ctx,
-                BoxName = "ZiolesGacha",
-            })
+            if ctx == "Check" then
+                return commF:InvokeServer("Cousin", "Check")
+            end
+            return commF:InvokeServer("Cousin", "Buy")
         end)
         if not ok then return false, tostring(result) end
         return true, result
     end
 
     task.spawn(function()
-        -- O servidor controla nível, dinheiro e cooldown (normalmente 2 horas).
-        -- Verificar periodicamente evita chamadas repetidas a cada poucos segundos.
-        while task.wait(math.max(15, tonumber(Config.Extras.GachaInterval) or 30)) do
+        -- O servidor valida nível, Beli e cooldown; tentar a cada 30 s permite
+        -- que a compra aconteça assim que o Gacha estiver disponível.
+        while task.wait(30) do
             if getgenv().AutoRandomFruit and Config.Extras.AutoGachaFruit then
-                local ok, result = GachaCall("Check")
-                if not ok then
-                    warn("[Gacha] Não foi possível verificar: " .. tostring(result))
-                elseif type(result) == "table" and result.RequirementsMet == true then
-                    local ok2, purchaseResult = GachaCall("Purchase")
-                    if ok2 then
-                        print("[Gacha] Pedido de roleta enviado. Resultado: " .. tostring(purchaseResult))
-                    else
-                        warn("[Gacha] Falha ao comprar: " .. tostring(purchaseResult))
-                    end
+                local ok, result = GachaCall("Purchase")
+                if ok then
+                    print("[Gacha] Resposta do servidor: " .. tostring(result))
+                else
+                    warn("[Gacha] Falha ao tentar girar: " .. tostring(result))
                 end
             end
         end
