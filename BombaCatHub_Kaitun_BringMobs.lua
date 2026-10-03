@@ -6755,7 +6755,12 @@ task.spawn(function()
     getgenv().HexUI = UI
 end)
 
-hoangtuveu()
+--============================================================
+-- [FIXED] EXTRAS (Gacha, códigos, no animation) movidos para ANTES de
+-- hoangtuveu(): essa função tem o loop principal infinito, por isso tudo
+-- o que ficava depois dela nunca chegava a correr (era por isso que o
+-- script não girava fruta). O bloco corre em task.spawn: não bloqueia.
+--============================================================
 --============================================================
 -- [EXTRAS] NO ANIMATION + AUTO REDEEM CODES + AUTO RANDOM FRUIT (GACHA)
 -- Opções (pode editar/desligar):
@@ -6810,66 +6815,39 @@ task.spawn(function()
         end
     end)
 
-    -- AUTO RANDOM FRUIT (COUSIN / ZIOLES)
-    -- Usa o mesmo fluxo observado no QuantumOnyx: CheckTime -> DLCBoxData.
+    -- AUTO RANDOM FRUIT (GACHA - Zioles)
     getgenv().AutoRandomFruit = Config.Extras.AutoGachaFruit
 
-    local function CousinCall(...)
-        local args = {...}
+    local GachaRF
+    local function getGachaRF()
+        if GachaRF then return GachaRF end
+        local ok = pcall(function()
+            GachaRF = game:GetService("ReplicatedStorage").Modules.Net:WaitForChild("RF/GachaNetworkRF", 10)
+        end)
+        return ok and GachaRF or nil
+    end
+
+    local function GachaCall(ctx)
+        local rf = getGachaRF()
+        if not rf then return false, "GachaNetworkRF nao encontrado" end
         local ok, result = pcall(function()
-            local rs = game:GetService("ReplicatedStorage")
-            local remotes = rs:WaitForChild("Remotes", 10)
-            local commF = remotes and remotes:WaitForChild("CommF_", 10)
-            if not commF then error("Remotes.CommF_ não encontrado") end
-            return commF:InvokeServer("Cousin", table.unpack(args))
+            return rf:InvokeServer({
+                SpokeNPC = "Blox Fruit Gacha",
+                Context = ctx,
+                BoxName = "ZiolesGacha",
+            })
         end)
         if not ok then return false, tostring(result) end
         return true, result
     end
 
-    local function GachaCall(ctx)
-        if ctx == "Check" then
-            local ok, result = CousinCall("CheckTime", "DLCBoxData")
-            if not ok then return false, result end
-            return true, result
-        elseif ctx == "Purchase" then
-            return CousinCall("DLCBoxData")
-        end
-        return false, "Contexto inválido: " .. tostring(ctx)
-    end
-
-    local function describeResult(value)
-        if typeof(value) == "table" then
-            local parts = {}
-            for k, v in pairs(value) do
-                table.insert(parts, tostring(k) .. "=" .. tostring(v))
-            end
-            return "{" .. table.concat(parts, ", ") .. "}"
-        end
-        return tostring(value)
-    end
-
     task.spawn(function()
-        while task.wait((Config.Extras and Config.Extras.GachaInterval) or 5) do
-            if getgenv().AutoRandomFruit and Config.Extras and Config.Extras.AutoGachaFruit then
-                local ok, ready = GachaCall("Check")
-                if not ok then
-                    warn("[Gacha] Erro no CheckTime:", tostring(ready))
-                elseif ready == true then
-                    local okBuy, result = GachaCall("Purchase")
-                    if not okBuy then
-                        warn("[Gacha] Erro na compra:", tostring(result))
-                    elseif result == 1 then
-                        print("[Gacha] Fruta comprada com sucesso!")
-                    elseif result == 2 then
-                        warn("[Gacha] Beli insuficiente para girar.")
-                    elseif result == 3 then
-                        warn("[Gacha] É necessário nível 50 para girar.")
-                    else
-                        print("[Gacha] Resposta de DLCBoxData:", describeResult(result))
-                    end
-                else
-                    print("[Gacha] Ainda não está disponível. CheckTime:", describeResult(ready))
+        while task.wait(Config.Extras.GachaInterval or 5) do
+            if getgenv().AutoRandomFruit and Config.Extras.AutoGachaFruit then
+                local ok, result = GachaCall("Check")
+                if ok and typeof(result) == "table" and result.RequirementsMet then
+                    local ok2, r2 = GachaCall("Purchase")
+                    print(ok2 and "[Gacha] Rolado com sucesso!" or ("[Gacha] Falha: " .. tostring(r2)))
                 end
             end
         end
@@ -6881,9 +6859,9 @@ task.spawn(function()
         Spin  = function() return GachaCall("Purchase") end,
         Check = function() return GachaCall("Check") end,
     }
-
 end)
 
+hoangtuveu()
 --============================================================
 -- [VOID ATTACK] ATAQUE ENVIADO PELO USUARIO
 --============================================================
