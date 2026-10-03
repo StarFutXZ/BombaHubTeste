@@ -2243,8 +2243,8 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             pcall(function() sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", math.huge) end)
         end
 
-        local radius  = Config.BringRadius or 3000
-        local maxPull = Config.BringMaxMobs or 50
+        local radius  = Config.BringRadius or 800
+        local maxPull = Config.BringMaxMobs or 30
         local target  = aRoot.CFrame
         local aPos    = aRoot.Position
         local pulled  = 0
@@ -2268,16 +2268,15 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                     -- so one rejected property does not stop the remaining NPCs.
                     pulled = pulled + 1
                     pcall(function()
+                        -- Move only the NPC root. Avoid forcing Humanoid into Physics
+                        -- or changing its movement stats, which can interfere with hit
+                        -- registration and normal NPC combat behaviour.
                         if (root.Position - aPos).Magnitude > 2 then
                             root.CFrame = target
                         end
                         root.CanCollide = false
                         root.AssemblyLinearVelocity  = Vector3.zero
                         root.AssemblyAngularVelocity = Vector3.zero
-                        hum.WalkSpeed = 0
-                        hum.JumpPower = 0
-                        hum.AutoRotate = false
-                        hum:ChangeState(Enum.HumanoidStateType.Physics)
                         local head = v:FindFirstChild("Head")
                         if head then head.CanCollide = false end
                     end)
