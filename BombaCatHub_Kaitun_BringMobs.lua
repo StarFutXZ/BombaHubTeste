@@ -1861,6 +1861,63 @@ end
     -- [FIXED] TWEEN CONTROLLER - GIỮ NGUYÊN 200/190
     -- ============================================================
     -- ============================================================
+    -- [FIXED v4] SEA 1 — UNDERWATER CITY VIA WHIRLPOOL
+    -- A entrada é o redemoinho (whirlpool) rodeado por 3 pedras pequenas, entre
+    -- Frozen Village e Prison. O requestEntrance só funciona ESTANDO junto ao
+    -- redemoinho. Bug antigo: o script chamava requestEntrance de longe (o
+    -- servidor ignorava) e depois voava em linha reta para as coordenadas da
+    -- cidade (x ~ 61000) = "horizonte" até lá chegar por voo.
+    -- Agora: voa ao redemoinho, chama requestEntrance perto dele, confirma que
+    -- entrou (x > 40000); alterna entre 2 pontos do redemoinho; se falhar 6x
+    -- cai no comportamento antigo durante 60s (Config.WhirlpoolNoFallback=true
+    -- desativa esse recuo e fica a tentar o redemoinho).
+    -- ============================================================
+    local UW = {attempts = 0, lastTry = 0, fallbackUntil = 0, step = 0}
+    local UW_ENTRIES = {
+        Vector3.new(3876.28, 35.11, -1939.32),   -- da tabela Portals do script
+        Vector3.new(3864.69, 6.74, -1926.21),    -- centro ao nível do mar
+    }
+    local UW_DEST = Vector3.new(61163.8515625, 11.759522438049316, 1819.7841796875)
+
+    function TweenController.InUnderwaterCity(pos)
+        return pos.X > 40000
+    end
+
+    -- true = tratado aqui (não seguir); false = deixar o fluxo normal continuar
+    function TweenController.GoToWhirlpool()
+        local char = game.Players.LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return true end
+        if not Config.WhirlpoolNoFallback and os.time() < UW.fallbackUntil then return false end
+
+        local entry = UW_ENTRIES[(UW.step % #UW_ENTRIES) + 1]
+        pcall(function() SetTask("SubTask", "Whirlpool -> Underwater City") end)
+        FlyCtl.SetGoal(CFrame.new(entry))
+
+        if (hrp.Position - entry).Magnitude > 12 then return true end   -- ainda a caminho
+
+        if tick() - UW.lastTry < 1.5 then return true end
+        UW.lastTry = tick()
+        UW.attempts = UW.attempts + 1
+        task.spawn(function()
+            pcall(function() Remotes.CommF_:InvokeServer("requestEntrance", UW_DEST) end)
+        end)
+        task.wait(1)
+
+        if not TweenController.InUnderwaterCity(hrp.Position) then
+            UW.step = UW.step + 1                       -- tenta o outro ponto do redemoinho
+            if UW.attempts >= 6 then
+                UW.attempts = 0
+                UW.fallbackUntil = os.time() + 60
+                pcall(function() Report("Whirlpool: 6 tentativas sem entrar na Underwater City") end)
+            end
+        else
+            UW.attempts = 0
+        end
+        return true
+    end
+
+    -- ============================================================
     -- [FIXED v3] VIAGEM PARA A ILHA SUBMERSA
     -- Bug antigo: depois de chegar ao NPC chamava o remote UMA vez e seguia
     -- logo para FlyCtl.SetGoal(alvo) mesmo que o teleporte falhasse → o
@@ -1947,6 +2004,12 @@ end
             bv.MaxForce = Vector3.new(0, math.huge, 0)
             bv.Velocity = Vector3.zero
             bv.Parent = head
+        end
+        -- [FIXED v4] Sea 1: alvo dentro da Underwater City e ainda não estamos lá →
+        -- ir ao Whirlpool (não voar em linha reta para x ~ 61000).
+        if SeaIndex == 1 and TweenController.InUnderwaterCity(a.Position)
+           and not TweenController.InUnderwaterCity(hrp.Position) then
+            if TweenController.GoToWhirlpool() then return end
         end
         -- [FIXED v3] Ilha Submersa: só se entra pelo Submarine Worker (Tiki Outpost,
         -- Sub Port 01). Nunca voar em direção às coordenadas da ilha (fica no
