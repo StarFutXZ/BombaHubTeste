@@ -2423,6 +2423,28 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             SetTask('MainTask', 'Auto Full Melee | ✅ Đã có tất cả!')
             return nil
         end
+
+        -- [FIX] Không để Auto Full Melee chặn LevelFarm khi chưa thể avançar.
+        -- Electro só pode ser tentado depois de Black Leg atingir 500 mastery.
+        -- Se faltar dinheiro/Fragments para a próxima compra, cede a vez ao
+        -- LevelFarm para continuar a ganhar XP, Beli e mastery em vez de parar.
+        for _, name in ipairs(allMelees) do
+            if not CheckItem(name) then
+                if name == "Electro" and (ScriptStorage.Melees["Black Leg"] or 0) < 500 then
+                    return nil
+                end
+
+                local data = MeleePrices[name]
+                local price = data and data.Price or {}
+                local beli = ScriptStorage.PlayerData.Beli or 0
+                local fragments = ScriptStorage.PlayerData.Fragments or 0
+                if (price.Beli and beli < price.Beli)
+                    or (price.Fragments and fragments < price.Fragments) then
+                    return nil
+                end
+                break
+            end
+        end
         return true
     end)
 
