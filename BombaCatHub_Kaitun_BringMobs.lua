@@ -6810,50 +6810,66 @@ task.spawn(function()
         end
     end)
 
-    -- AUTO RANDOM FRUIT (GACHA - Zioles), adaptado do QuantumOnyx
+    -- AUTO RANDOM FRUIT (COUSIN / ZIOLES)
+    -- Usa o mesmo fluxo observado no QuantumOnyx: CheckTime -> DLCBoxData.
     getgenv().AutoRandomFruit = Config.Extras.AutoGachaFruit
 
-    local GachaRF
-    local function getGachaRF()
-        if GachaRF and GachaRF.Parent then return GachaRF end
-        local ok = pcall(function()
-            local replicatedStorage = game:GetService("ReplicatedStorage")
-            local modules = replicatedStorage:WaitForChild("Modules", 10)
-            local net = modules and modules:WaitForChild("Net", 10)
-            GachaRF = net and net:WaitForChild("RF/GachaNetworkRF", 10)
-        end)
-        return ok and GachaRF or nil
-    end
-
-    local function GachaCall(ctx)
-        local rf = getGachaRF()
-        if not rf then return false, "GachaNetworkRF não encontrado" end
+    local function CousinCall(...)
+        local args = {...}
         local ok, result = pcall(function()
-            return rf:InvokeServer({
-                SpokeNPC = "Blox Fruit Gacha",
-                Context = ctx,
-                BoxName = "ZiolesGacha",
-            })
+            local rs = game:GetService("ReplicatedStorage")
+            local remotes = rs:WaitForChild("Remotes", 10)
+            local commF = remotes and remotes:WaitForChild("CommF_", 10)
+            if not commF then error("Remotes.CommF_ não encontrado") end
+            return commF:InvokeServer("Cousin", table.unpack(args))
         end)
         if not ok then return false, tostring(result) end
         return true, result
     end
 
+    local function GachaCall(ctx)
+        if ctx == "Check" then
+            local ok, result = CousinCall("CheckTime", "DLCBoxData")
+            if not ok then return false, result end
+            return true, result
+        elseif ctx == "Purchase" then
+            return CousinCall("DLCBoxData")
+        end
+        return false, "Contexto inválido: " .. tostring(ctx)
+    end
+
+    local function describeResult(value)
+        if typeof(value) == "table" then
+            local parts = {}
+            for k, v in pairs(value) do
+                table.insert(parts, tostring(k) .. "=" .. tostring(v))
+            end
+            return "{" .. table.concat(parts, ", ") .. "}"
+        end
+        return tostring(value)
+    end
+
     task.spawn(function()
         while task.wait((Config.Extras and Config.Extras.GachaInterval) or 5) do
             if getgenv().AutoRandomFruit and Config.Extras and Config.Extras.AutoGachaFruit then
-                local ok, result = GachaCall("Check")
+                local ok, ready = GachaCall("Check")
                 if not ok then
-                    warn("[Gacha] Falha ao verificar:", tostring(result))
-                elseif typeof(result) == "table" and result.RequirementsMet then
-                    local ok2, result2 = GachaCall("Purchase")
-                    if ok2 then
-                        print("[Gacha] Resposta da compra:", tostring(result2))
+                    warn("[Gacha] Erro no CheckTime:", tostring(ready))
+                elseif ready == true then
+                    local okBuy, result = GachaCall("Purchase")
+                    if not okBuy then
+                        warn("[Gacha] Erro na compra:", tostring(result))
+                    elseif result == 1 then
+                        print("[Gacha] Fruta comprada com sucesso!")
+                    elseif result == 2 then
+                        warn("[Gacha] Beli insuficiente para girar.")
+                    elseif result == 3 then
+                        warn("[Gacha] É necessário nível 50 para girar.")
                     else
-                        warn("[Gacha] Falha na compra:", tostring(result2))
+                        print("[Gacha] Resposta de DLCBoxData:", describeResult(result))
                     end
                 else
-                    print("[Gacha] Ainda não pode girar / resposta Check:", tostring(result))
+                    print("[Gacha] Ainda não está disponível. CheckTime:", describeResult(ready))
                 end
             end
         end
