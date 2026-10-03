@@ -1860,7 +1860,75 @@ end
     -- ============================================================
     -- [FIXED] TWEEN CONTROLLER - GIỮ NGUYÊN 200/190
     -- ============================================================
-    local lastUnderwaterEntranceAttempt = 0
+    -- ============================================================
+    -- [FIXED v3] VIAGEM PARA A ILHA SUBMERSA
+    -- Bug antigo: depois de chegar ao NPC chamava o remote UMA vez e seguia
+    -- logo para FlyCtl.SetGoal(alvo) mesmo que o teleporte falhasse → o
+    -- personagem voava para as coordenadas da ilha (mar aberto) até ao
+    -- "horizonte". Agora: voa até ao Submarine Worker, tenta o remote várias
+    -- vezes, confirma que entrou (zona submersa) e, se falhar, PÁRA e espera
+    -- 2 min em vez de voar para o mar.
+    -- Requisito do jogo: ter derrotado o Tyrant of the Skies pelo menos 1x
+    -- (senão o NPC só diz que a ilha está ocupada por bandidos).
+    -- ============================================================
+    local SubTravel = {attempts = 0, lastTry = 0, blockedUntil = 0}
+    local SUB_NPC_FALLBACK = Vector3.new(-16269.7, 25.2, 1373.7)
+
+    function TweenController.InSubmergedZone(pos)
+        return pos.Y < -1200 and pos.X > 8000 and pos.X < 13000
+           and pos.Z > 8000 and pos.Z < 11500
+    end
+
+    local function FindSubmarineWorker()
+        for _, root in ipairs({workspace:FindFirstChild("NPCs"), game.ReplicatedStorage:FindFirstChild("NPCs")}) do
+            if root then
+                for _, npc in ipairs(root:GetChildren()) do
+                    if npc.Name == "Submarine Worker" then
+                        local ok, p = pcall(function() return npc:GetPivot().Position end)
+                        -- o da superfície (Tiki Outpost), não o da ilha submersa
+                        if ok and p.Y > -1000 and p.X < -10000 then return p end
+                    end
+                end
+            end
+        end
+        return SUB_NPC_FALLBACK
+    end
+
+    function TweenController.GoToSubmarine()
+        local char = game.Players.LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        if os.time() < SubTravel.blockedUntil then return end   -- falhou: não voa para o mar
+
+        local npcPos = FindSubmarineWorker()
+        local standAt = CFrame.new(npcPos + Vector3.new(0, 3, 0))
+        pcall(function() SetTask("SubTask", "Submarine Worker -> Ilha Submersa") end)
+        FlyCtl.SetGoal(standAt)                       -- voa/mantém-se junto ao NPC
+
+        if (hrp.Position - npcPos).Magnitude > 15 then
+            SubTravel.attempts = 0
+            return
+        end
+
+        if tick() - SubTravel.lastTry < 3 then return end
+        SubTravel.lastTry = tick()
+        SubTravel.attempts = SubTravel.attempts + 1
+        task.spawn(function()
+            pcall(function()
+                local net = require(game.ReplicatedStorage.Modules.Net)
+                net:RemoteFunction('SubmarineWorkerSpeak'):InvokeServer('TravelToSubmergedIsland')
+            end)
+        end)
+        task.wait(1.5)
+
+        if SubTravel.attempts >= 5 and not TweenController.InSubmergedZone(hrp.Position) then
+            SubTravel.blockedUntil = os.time() + 120
+            SubTravel.attempts = 0
+            pcall(function() SetTask("SubTask", "Submarine: nao entrou na Ilha Submersa (falta derrotar Tyrant of the Skies?)") end)
+            pcall(function() Report("Submarine Worker: 5 tentativas sem entrar na Ilha Submersa") end)
+        end
+    end
+
     function TweenController.Create(W)
         if not W or TweenDebounce then return end
         local a = typeof(W) ~= 'CFrame' and ConvertTo(CFrame, W) or W
@@ -1872,35 +1940,6 @@ end
         -- nhánh BypassTP (dist>=4000 → đổi spawn point) — không còn dùng
         -- cơ chế bypass qua spawn point nữa, mọi khoảng cách đều tween bình
         -- thường qua block (từ main_red_magic_beta.txt).
-        -- [FIX v3] Sea 1 / Underwater City: dar prioridade à entrada antes do tween.
-        -- Fishman Warrior/Commando ficam nas coordenadas ~61k; não iniciar voo longo
-        -- no mesmo ciclo em que se tenta requestEntrance.
-        if SeaIndex == 1 then
-            local underwaterCity = Vector3.new(61164, 5, 1820)
-            local entrancePos = Vector3.new(61163.8516, 11.7595, 1819.7842)
-            local targetPos = a.Position
-            local currentPos = hrp.Position
-            local targetIsUnderwater = (targetPos - underwaterCity).Magnitude < 5000
-            local playerIsFar = (currentPos - underwaterCity).Magnitude > 1200
-
-            if targetIsUnderwater and playerIsFar then
-                if (os.clock() - lastUnderwaterEntranceAttempt) >= 8 then
-                    lastUnderwaterEntranceAttempt = os.clock()
-                    pcall(function()
-                        Services.ReplicatedStorage:WaitForChild("Remotes")
-                            :WaitForChild("CommF_"):InvokeServer("requestEntrance", entrancePos)
-                    end)
-                    task.wait(1)
-                    character = game.Players.LocalPlayer.Character
-                    hrp = character and character:FindFirstChild("HumanoidRootPart")
-                    if not hrp then return end
-                end
-                -- Não deixar o tween/FlyCtl antigo continuar a atravessar o mapa.
-                -- O próximo ciclo tenta novamente a entrada, respeitando o intervalo.
-                return
-            end
-        end
-
         local head = character:WaitForChild("Head")
         if not head:FindFirstChild("eltrul") then
             local bv = Instance.new('BodyVelocity')
@@ -1909,21 +1948,20 @@ end
             bv.Velocity = Vector3.zero
             bv.Parent = head
         end
+        -- [FIXED v3] Ilha Submersa: só se entra pelo Submarine Worker (Tiki Outpost,
+        -- Sub Port 01). Nunca voar em direção às coordenadas da ilha (fica no
+        -- fundo do mar = "horizonte"); se o alvo está lá dentro e ainda não estamos,
+        -- o controlo passa para GoToSubmarine().
+        if SeaIndex == 3 and TweenController.InSubmergedZone(a.Position)
+           and not TweenController.InSubmergedZone(hrp.Position) then
+            TweenController.GoToSubmarine()
+            return
+        end
         if CaculateDistance(a) > 500 then
             if SeaIndex == 3 and not ScriptStorage.Backpack['Valkyrie Helm'] then
             elseif SeaIndex ~= 3 then
                 GetPortal(a)
             end
-        end
-        if CaculateDistance(Vector3.new(11256, -2138.0, 9888), a) < (CaculateDistance(a) - 700) and SeaIndex == 3 then
-            local gatePos = CFrame.new(-16269.0, 23, 1371)
-            if CaculateDistance(gatePos) > 60 then
-                TweenController.Create(gatePos)
-                task.wait(1)
-                return
-            end
-            local net = require(game.ReplicatedStorage.Modules.Net)
-            net:RemoteFunction('SubmarineWorkerSpeak'):InvokeServer('TravelToSubmergedIsland')
         end
 
         -- [FIXED v2] só actualiza o alvo; o movimento é feito pelo FlyCtl (Heartbeat)
