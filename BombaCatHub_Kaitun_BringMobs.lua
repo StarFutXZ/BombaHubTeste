@@ -2210,6 +2210,13 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         return string.find(string.lower(name), "prisoner", 1, true) ~= nil and _onPrisonIsland()
     end
 
+    -- [v8] teste empírico de ownership: estado por mob = probe / ok / ghost
+    local _bringProbe = setmetatable({}, {__mode = "k"})
+    local function _isMineStrict(part)
+        if not isnetworkowner then return false end
+        local ok, res = pcall(isnetworkowner, part)
+        return ok and res == true
+    end
     local _bringSimTick = 0
     local function _isMine(part)
         -- Network ownership APIs differ between executors. Treat errors as
@@ -2264,33 +2271,66 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                 local root = v:FindFirstChild("HumanoidRootPart")
                 if hum and root and hum.Health > 0
                    and (root.Position - aPos).Magnitude <= radius then
-                    -- [FIXED v7] Só puxa mobs de que somos network owner. Um mob que o
-                    -- servidor não nos entregou só muda de sítio NO TEU ECRÃ (fantasma):
-                    -- parece "puxado", mas no servidor continua longe, por isso os hits
-                    -- falham, o script marca-o como "falhado" (FailureCount) e fica sem
-                    -- alvos = "puxa todos mas só mata 1 e fica parado".
-                    if not _isMine(root) then
-                        notOwner = notOwner + 1
-                    else
-                    pulled = pulled + 1
-                    pcall(function()
-                        -- Move only the NPC root. Avoid forcing Humanoid into Physics
-                        -- or changing its movement stats, which can interfere with hit
-                        -- registration and normal NPC combat behaviour.
-                        if (root.Position - aPos).Magnitude > 2 then
-                            root.CFrame = target
+                    -- [FIXED v8] TESTE EMPÍRICO DE OWNERSHIP (isnetworkowner() falha/mente em
+                    -- vários executors e com ele o bring deixou de puxar). Puxa-se o mob e
+                    -- vê-se o que acontece: se ao fim de 0.35s ele continua junto ao ponto de
+                    -- atração, o servidor aceitou a posição (ok); se voltou ao sítio dele, é um
+                    -- "fantasma" (só se mexia no teu ecrã): deixa de ser puxado durante 8s e
+                    -- depois volta a ser testado. Fantasmas = mobs que o servidor não te deu.
+                    local now  = tick()
+                    local st   = _bringProbe[v]
+                    local dist = (root.Position - aPos).Magnitude
+                    local skip = false
+                    if st and st.state == "ghost" then
+                        if now >= st.untilT then
+                            _bringProbe[v] = nil
+                            st = nil
+                        else
+                            skip = true
+                            notOwner = notOwner + 1
                         end
-                        root.CanCollide = false
-                        root.AssemblyLinearVelocity  = Vector3.zero
-                        root.AssemblyAngularVelocity = Vector3.zero
-                        local head = v:FindFirstChild("Head")
-                        if head then head.CanCollide = false end
-                    end)
+                    end
+                    if not skip then
+                        if not st then
+                            st = {t0 = now, state = "probe", bad = 0}
+                            _bringProbe[v] = st
+                        end
+                        if st.state == "probe" then
+                            if now - st.t0 > 0.35 then
+                                if dist < 8 or _isMineStrict(root) then
+                                    st.state = "ok"
+                                else
+                                    st.state = "ghost"; st.untilT = now + 8
+                                end
+                            end
+                        elseif st.state == "ok" then
+                            if dist > 20 and not _isMineStrict(root) then
+                                st.bad = st.bad + 1
+                                if st.bad > 20 then st.state = "ghost"; st.untilT = now + 8; st.bad = 0 end
+                            else
+                                st.bad = 0
+                            end
+                        end
+                        if st.state == "ghost" then
+                            notOwner = notOwner + 1
+                        else
+                            pulled = pulled + 1
+                            pcall(function()
+                                if dist > 2 then
+                                    root.CFrame = target
+                                end
+                                root.CanCollide = false
+                                root.AssemblyLinearVelocity  = Vector3.zero
+                                root.AssemblyAngularVelocity = Vector3.zero
+                                local head = v:FindFirstChild("Head")
+                                if head then head.CanCollide = false end
+                            end)
+                        end
                     end
                 end
             end
         end
-        BringDbgText = "Bring: " .. pulled .. " puxados, " .. notOwner .. " sem owner"
+        BringDbgText = "Bring: " .. pulled .. " puxados, " .. notOwner .. " fantasma"
         BringDbgTick = tick()
     end
 
