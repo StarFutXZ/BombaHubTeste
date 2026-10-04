@@ -2156,6 +2156,36 @@ end
     -- levar dano ao alcance; com o bring parado volta sempre a S1.
     --   S2 = 1 RegisterAttack no total, só pares   S3 = 1 no total, pares + modelo
     --   S4 = 1 por alvo, só pares
+    -- [FIXED v12] ID DE SESSÃO DO HIT DINÂMICO. O 4.º argumento do RegisterHit estava
+    -- FIXO ("078da5141"). Em scripts open source de 2025-2026 (haxhell "Auto Kill Open
+    -- Source with Fast Attack") esse ID é calculado: 3 caracteres do teu UserId
+    -- (tostring(UserId):sub(2,4)) + 5 caracteres do endereço da "combat thread" do jogo
+    -- (tostring(getupvalues(getrenv()._G.SendHitsToServer)[1]):sub(11,15)). O endereço
+    -- muda de sessão para sessão/servidor, por isso um ID fixo só vale onde foi
+    -- capturado ("hits tudo-ou-nada por servidor", como descreve o blox-fast-farm).
+    -- Recalculado de 1 em 1 s; se o executor não tiver getrenv/getupvalues usa o fixo.
+    HitSessionFallback = "078da5141"
+    HitSessionCache = {id = nil, t = 0, dynamic = false}
+    function GetHitSessionId()
+        local c = HitSessionCache
+        if c.id and tick() - c.t < 1 then return c.id end
+        local ok, id = pcall(function()
+            local send = getrenv()._G.SendHitsToServer
+            local thread = getupvalues(send)[1]
+            local userSlice = tostring(game.Players.LocalPlayer.UserId):sub(2, 4)
+            local memSlice  = tostring(thread):sub(11, 15)
+            return userSlice .. memSlice
+        end)
+        if ok and type(id) == "string" and #id >= 6 then
+            if c.id ~= id then pcall(print, "[BombaCat Hub] ID de sessão do hit: " .. id .. " (dinâmico)") end
+            c.id, c.t, c.dynamic = id, tick(), true
+        else
+            if c.id ~= HitSessionFallback then pcall(print, "[BombaCat Hub] ID de sessão do hit: fixo (getrenv/getupvalues indisponível)") end
+            c.id, c.t, c.dynamic = HitSessionFallback, tick(), false
+        end
+        return c.id
+    end
+
     HitStrategy = 1
     HitStrategyTick = 0
     HIT_STRATEGIES = {
@@ -2187,7 +2217,7 @@ end
             end)
         end
         local st = HIT_STRATEGIES[HitStrategy] or HIT_STRATEGIES[1]
-        local y = {[1] = nil, [2] = {}, [4] = "078da5141"}
+        local y = {[1] = nil, [2] = {}, [4] = GetHitSessionId()}
         if not st.perTargetAttack then w:FireServer(0) end
         for _, L in ipairs(X) do
             if st.perTargetAttack then w:FireServer(0) end
@@ -2424,6 +2454,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             if pulled > 0 then BringActiveTick = now end
             BringDbgText = "Bring: " .. pulled .. " puxados, " .. ghosts .. " fantasma, " .. immune
                 .. " imunes | Hit S" .. tostring(HitStrategy or 1)
+                .. (HitSessionCache and HitSessionCache.dynamic and " ID-D" or " ID-F")
             BringDbgTick = now
         end
 
