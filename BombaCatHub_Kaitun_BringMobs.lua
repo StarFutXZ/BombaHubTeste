@@ -48,7 +48,7 @@ Config = {
         GodhumanAtV2Mastery  = 400,
     },
     AutoKen = true,
-    BringMobs = true,
+    BringMobs = false,
     -- Bring mobs from across nearby islands, but only names in the active farm target list.
     BringRadius = 800,
     BringMaxMobs = 2,
@@ -106,122 +106,6 @@ local CoreGui = game:GetService("CoreGui")
 
 local lp = Players.LocalPlayer
 
--- ============================================================
--- [ADDED] PAINEL NO TOPO: ligar/desligar itens em tempo real
--- Toca em "BombaCat Hub" no topo do ecrã para abrir/fechar.
--- Os botões mexem diretamente na tabela Config (lida em loop pelo script).
--- ============================================================
-task.spawn(function()
-    task.wait(6) -- esperar o resto do script criar Config.Extras
-    local ok, err = pcall(function()
-        local parent = (gethui and gethui()) or CoreGui
-        local old = parent:FindFirstChild("BombaCatItemsUI")
-        if old then old:Destroy() end
-
-        local gui = Instance.new("ScreenGui")
-        gui.Name = "BombaCatItemsUI"
-        gui.ResetOnSpawn = false
-        gui.IgnoreGuiInset = true
-        gui.DisplayOrder = 999
-        local okParent = pcall(function() gui.Parent = parent end)
-        if not okParent then gui.Parent = lp:WaitForChild("PlayerGui") end
-
-        local header = Instance.new("TextButton")
-        header.Size = UDim2.new(0, 240, 0, 32)
-        header.AnchorPoint = Vector2.new(0.5, 0)
-        header.Position = UDim2.new(0.5, 0, 0, 4)
-        header.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-        header.TextColor3 = Color3.fromRGB(255, 200, 0)
-        header.Font = Enum.Font.GothamBold
-        header.TextSize = 15
-        header.Text = "BombaCat Hub  ▼"
-        header.Parent = gui
-        Instance.new("UICorner", header).CornerRadius = UDim.new(0, 8)
-
-        local panel = Instance.new("ScrollingFrame")
-        panel.Size = UDim2.new(0, 240, 0, 260)
-        panel.AnchorPoint = Vector2.new(0.5, 0)
-        panel.Position = UDim2.new(0.5, 0, 0, 40)
-        panel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        panel.BackgroundTransparency = 0.1
-        panel.BorderSizePixel = 0
-        panel.ScrollBarThickness = 4
-        panel.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        panel.CanvasSize = UDim2.new(0, 0, 0, 0)
-        panel.Visible = false
-        panel.Parent = gui
-        Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 8)
-
-        local layout = Instance.new("UIListLayout", panel)
-        layout.Padding = UDim.new(0, 4)
-        layout.SortOrder = Enum.SortOrder.LayoutOrder
-        local pad = Instance.new("UIPadding", panel)
-        pad.PaddingTop = UDim.new(0, 4); pad.PaddingBottom = UDim.new(0, 4)
-        pad.PaddingLeft = UDim.new(0, 4); pad.PaddingRight = UDim.new(0, 4)
-
-        header.MouseButton1Click:Connect(function()
-            panel.Visible = not panel.Visible
-            header.Text = panel.Visible and "BombaCat Hub  ▲" or "BombaCat Hub  ▼"
-        end)
-
-        local order = 0
-        local function nextOrder() order = order + 1; return order end
-
-        local function addTitle(text)
-            local t = Instance.new("TextLabel")
-            t.Size = UDim2.new(1, 0, 0, 22)
-            t.BackgroundTransparency = 1
-            t.Font = Enum.Font.GothamBold
-            t.TextSize = 13
-            t.TextColor3 = Color3.fromRGB(255, 200, 0)
-            t.TextXAlignment = Enum.TextXAlignment.Left
-            t.Text = text
-            t.LayoutOrder = nextOrder()
-            t.Parent = panel
-        end
-
-        local function addToggle(tbl, key)
-            local b = Instance.new("TextButton")
-            b.Size = UDim2.new(1, 0, 0, 30)
-            b.Font = Enum.Font.Gotham
-            b.TextSize = 13
-            b.TextColor3 = Color3.new(1, 1, 1)
-            b.LayoutOrder = nextOrder()
-            b.Parent = panel
-            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-            local function refresh()
-                local on = tbl[key] == true
-                b.Text = tostring(key) .. "   [" .. (on and "ON" or "OFF") .. "]"
-                b.BackgroundColor3 = on and Color3.fromRGB(35, 120, 55) or Color3.fromRGB(130, 40, 40)
-            end
-            b.MouseButton1Click:Connect(function()
-                tbl[key] = not (tbl[key] == true)
-                refresh()
-            end)
-            refresh()
-        end
-
-        local function addSection(title, tbl)
-            if type(tbl) ~= "table" then return end
-            local keys = {}
-            for k, v in pairs(tbl) do
-                if type(v) == "boolean" then table.insert(keys, k) end
-            end
-            if #keys == 0 then return end
-            table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
-            addTitle(title)
-            for _, k in ipairs(keys) do addToggle(tbl, k) end
-        end
-
-        addSection("ITENS", Config.Items)
-        addSection("ESPADAS", Config.Sword)
-        addSection("ARMAS DE BOSS", Config.BossWeapons)
-        addSection("EXTRAS", Config.Extras)
-        addSection("GERAL", Config)
-        addSection("MELEE", Config.Melee)
-    end)
-    if not ok then warn("[BombaCat Hub] Painel falhou:", err) end
-end)
 
 print("[BombaCat Hub] A iniciar...")
 timeee = os.time()
@@ -1505,8 +1389,9 @@ end
         "SpecialBossesTask", "SwordBossTask", "BossesTask",
         "RaidController", "AutoRaidIce",
         "CakePrinceTask", "MeleesController",
+        "Saber", -- [FIX] antes estava depois do LevelFarm e nunca chegava a correr (first-match-wins)
         "LevelFarm", "Tushita", 'Yama',
-        "Saber", "CursedDualKatana", "SoulGuitar", "EvoRace", "RaceAwakening",
+        "CursedDualKatana", "SoulGuitar", "EvoRace", "RaceAwakening",
         -- [FIXED - xung đột code phát hiện khi rà toàn bộ] Bỏ "Wenlocktoad"
         -- và "ExpRedeem" khỏi danh sách này — cả 2 CÓ gọi :Register() (tạo
         -- task slot rỗng) nhưng KHÔNG hề có RegisterMethod("Refresh"/"Start")
@@ -3054,6 +2939,16 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             local locs = TeacherLocations[teacher]
             if not locs then return true end
 
+            -- [FIX] Electro: se estiver no Sea 2/3, volta ao Sea 1 para o comprar
+            if meleeName == "Electro" and SeaIndex ~= 1 then
+                SetTask('MainTask', 'Auto Full Melee | A voltar ao Sea 1 para comprar o Electro')
+                if tick() - (_G.__LastTravelMain or 0) > 15 then
+                    _G.__LastTravelMain = tick()
+                    Remotes.CommF_:InvokeServer("TravelMain")
+                end
+                return false
+            end
+
             local cf = locs[SeaIndex]
             if not cf then
                 if SeaIndex ~= 3 then
@@ -3074,6 +2969,11 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
             if _G.Stop then return end
 
             local bp = CheckItem(melee.name)
+            if not bp and melee.name == "Electro"
+               and (ScriptStorage.Melees["Black Leg"] or 0) < (Config.Melee.RaidAtV1Mastery or 500) then
+                -- [FIX] Electro só depois do Dark Step chegar ao mastery alvo (500)
+                continue
+            end
             if not bp then
                 -- [NEW] Dragon Claw V1 cần riêng 1500 Fragments — nếu chưa
                 -- đủ thì đây chính là lý do phải farm raid (raid cho
@@ -4030,9 +3930,11 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     -- ============================================================
     FunctionsHandler.Saber:RegisterMethod('Refresh', function()
         if not Config.Items.Saber then return end
+        if SeaIndex ~= 1 then return end -- [FIX] a quest do Saber só existe no Sea 1
         if ScriptStorage.Backpack.Saber then return end
         if ScriptStorage.PlayerData.Level < 200 then return end
         local X = Remotes.CommF_:InvokeServer('ProQuestProgress')
+        if type(X) ~= "table" or type(X.Plates) ~= "table" then return end
         local h
         for w, w in X.Plates do if w == false then h = 1 end end
         if not h then
@@ -4451,12 +4353,48 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         return true -- 1.8s liên tục không thấy sống lại — chắc chắn chết
     end
 
+    -- ============================================================
+    -- [FIX] Só farmar boss se AINDA for preciso.
+    -- Antes: a lista de bosses nunca era filtrada (o filtro estava dentro de
+    -- UtillyItemsActivitation, que nunca corria), por isso matava sempre
+    -- qualquer boss que estivesse spawnado, mesmo com o item já na conta.
+    -- Agora: respeita Config.BossWeapons[boss]=false e salta o boss se o item
+    -- que ele dá já existe (ou se não queres o item).
+    -- ============================================================
+    local function _has(name)
+        local ok, r = pcall(function()
+            return (ScriptStorage.Backpack and ScriptStorage.Backpack[name])
+                or (ScriptStorage.Melees and ScriptStorage.Melees[name])
+                or (CheckItem and CheckItem(name))
+        end)
+        return ok and r and true or false
+    end
+    local BossDropRules = {
+        ["Awakened Ice Admiral"] = function() return _has("Rengoku") end,
+        ["Tide Keeper"]          = function() return _has("Sharkman Karate") or _has("Water Key") end,
+        ["Deandre"]              = function() return _has("Yama") end,
+        ["Urban"]                = function() return _has("Yama") end,
+        ["Diablo"]               = function() return _has("Yama") end,
+        ["Soul Reaper"]          = function() return _has("Hallow Scythe") end,
+        ["Darkbeard"]            = function() return _has("Soul Guitar") or Config.Items.SoulGuitar == false end,
+        ["Beautiful Pirates"]    = function() return _has("Canvander") end,
+    }
+    function BossStillNeeded(bossName)
+        if Config.BossWeapons[bossName] == false then return false end
+        local rule = BossDropRules[bossName]
+        if rule and rule() then return false end
+        for item, d in pairs(DropItemData) do
+            if d.Boss == bossName and _has(item) then return false end
+        end
+        return true
+    end
+
     FunctionsHandler.BossesTask:RegisterMethod("Refresh", function()
         local k
         for h, h in BossesOrder do
             -- [FIXED] Thêm gate Config.BossWeapons — trước đây không có cách
             -- nào tắt farm 1 boss cụ thể, giờ set Config.BossWeapons[name]=false là bỏ qua
-            if Config.BossWeapons[h] ~= false then
+            if Config.BossWeapons[h] ~= false and BossStillNeeded(h) then
                 local X = BossesOrderLevel[h]
                 if ScriptStorage.PlayerData.Level >= X then
                     local X = ScriptStorage.Enemies[h]
@@ -4483,12 +4421,8 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                 if k.Parent == nil or (k:FindFirstChild("Humanoid") and k.Humanoid.Health <= 0) then
                     -- [FIXED] Xác nhận chết thật trước khi reset (tránh false-positive lúc chuyển phase)
                     if ConfirmBossDead(k.Name) then
-                        SetTask('SubTask', '✅ Đã hạ ' .. k.Name .. ' — reset về farm level')
-                        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                        if hum then
-                            hum.Health = 0
-                            LocalPlayer.CharacterAdded:Wait()
-                        end
+                        -- [FIX] Já NÃO faz reset ao personagem: morrer depois do boss fazia perder o drop.
+                        SetTask('SubTask', '✅ Boss morto: ' .. k.Name)
                     else
                         SetTask('SubTask', k.Name .. ' đang chuyển phase — tiếp tục đánh')
                     end
@@ -4504,7 +4438,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         local k
         for h, X in SpecialBossesOrder do
             -- [FIXED] Cùng gate Config.BossWeapons như BossesTask
-            if Config.BossWeapons[h] ~= false and ScriptStorage.PlayerData.Level >= X then
+            if Config.BossWeapons[h] ~= false and BossStillNeeded(h) and ScriptStorage.PlayerData.Level >= X then
                 local X = ScriptStorage.Enemies[h]
                 if X and X:FindFirstChild('Humanoid') and X.Humanoid.Health > 0 then k = X end
             end
@@ -4539,12 +4473,8 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                 if k.Parent == nil or (k:FindFirstChild("Humanoid") and k.Humanoid.Health <= 0) then
                     -- [FIXED] Xác nhận chết thật trước khi reset (tránh false-positive lúc chuyển phase)
                     if ConfirmBossDead(k.Name) then
-                        SetTask('SubTask', '✅ Đã hạ ' .. k.Name .. ' — reset về farm level')
-                        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                        if hum then
-                            hum.Health = 0
-                            LocalPlayer.CharacterAdded:Wait()
-                        end
+                        -- [FIX] Já NÃO faz reset ao personagem: morrer depois do boss fazia perder o drop.
+                        SetTask('SubTask', '✅ Boss morto: ' .. k.Name)
                     else
                         SetTask('SubTask', k.Name .. ' đang chuyển phase — tiếp tục đánh')
                     end
@@ -4667,12 +4597,8 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         pcall(function()
             if boss.Parent == nil or (boss:FindFirstChild("Humanoid") and boss.Humanoid.Health <= 0) then
                 if ConfirmBossDead(sw.boss) then
-                    SetTask('SubTask', '✅ Đã hạ ' .. sw.boss .. ' — reset về farm level')
-                    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                    if hum then
-                        hum.Health = 0
-                        LocalPlayer.CharacterAdded:Wait()
-                    end
+                    -- [FIX] sem reset ao personagem (fazia perder o drop)
+                    SetTask('SubTask', '✅ Boss morto: ' .. sw.boss)
                 else
                     SetTask('SubTask', sw.boss .. ' đang chuyển phase — tiếp tục đánh')
                 end
@@ -4778,12 +4704,8 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                         -- [FIXED] Đây chính xác là case boss man báo — Cake Prince
                         -- ("Hải Tặc Đào Hoa") chuyển phase 2, code cũ tưởng chết
                         if ConfirmBossDead("Cake Prince") then
-                            SetTask('SubTask', '✅ Đã hạ Cake Prince — reset về farm level')
-                            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                            if hum then
-                                hum.Health = 0
-                                LocalPlayer.CharacterAdded:Wait()
-                            end
+                            -- [FIX] sem reset ao personagem (fazia perder o drop)
+                            SetTask('SubTask', '✅ Cake Prince morto')
                         else
                             SetTask('SubTask', 'Cake Prince đang chuyển phase — tiếp tục đánh')
                         end
@@ -6524,7 +6446,12 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         -- Detective -> UseKey -> Ice Admiral -> TravelDressrosa, sem bloqueios longos.
         local DOOR_CF = CFrame.new(1347.71, 37.38, -1325.65)
         while task.wait(1) do
-            if Config.AutoSea2 and (ScriptStorage.PlayerData.Level or 0) >= 700 and SeaIndex == 1 then
+            local needSaber = Config.Items.Saber and not ScriptStorage.Backpack.Saber and not (CheckItem and CheckItem("Saber"))
+            -- [FIX] Dark Step no mastery alvo e sem Electro: ficar/voltar ao Sea 1 até o comprar
+            local needElectro = Config.Items.AutoFullyMelees and Config.Melee.AutoBuy
+                and not (CheckItem and CheckItem("Electro"))
+                and (ScriptStorage.Melees["Black Leg"] or 0) >= (Config.Melee.RaidAtV1Mastery or 500)
+            if Config.AutoSea2 and not needSaber and not needElectro and (ScriptStorage.PlayerData.Level or 0) >= 700 and SeaIndex == 1 then
                 local ok, err = pcall(function()
                     _G.SeaTransitionActive = true
                     local prog = Remotes.CommF_:InvokeServer("DressrosaQuestProgress")
