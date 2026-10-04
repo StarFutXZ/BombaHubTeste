@@ -48,10 +48,8 @@ Config = {
     },
     AutoKen = true,
     BringMobs = true,
-    -- [v11] Bring refeito. Os hubs testados puxam a 250-350 studs e o jogo parece ter uma "trela":
-    -- um mob arrastado para longe do spawn deixa de levar dano.
-    BringRadius = 250,   -- distância máx. mob -> mob de referência
-    BringLeash  = 250,   -- distância máx. do SPAWN do mob (OldPosition) ao ponto de atração
+    -- Bring mobs from across nearby islands, but only names in the active farm target list.
+    BringRadius = 800,
     BringMaxMobs = 30,
     PanicMode = {
         Enabled          = true,
@@ -92,7 +90,7 @@ _G.SelectWeapon = nil
 task.spawn(function()
     while task.wait(0.5) do
         pcall(function()
-            local bp = LocalPlayer:FindFirstChild("Backpack")
+            local bp = lp:FindFirstChild("Backpack")
             if not bp then return end
             if _G.ChooseWP == "Melee" then
                 for _, v in pairs(bp:GetChildren()) do
@@ -2151,59 +2149,6 @@ end
     local X = (Services.ReplicatedStorage.Modules.Net)
     local w = require(X):RemoteEvent("RegisterAttack", true)
     local D = require(X):RemoteEvent("RegisterHit", true)
-    -- [v11] Formato do pacote de hit. S1 = original (1 RegisterAttack por alvo, pares +
-    -- modelo duplicado). Só roda para S2/S3/S4 enquanto o bring estiver a puxar e nada
-    -- levar dano ao alcance; com o bring parado volta sempre a S1.
-    --   S2 = 1 RegisterAttack no total, só pares   S3 = 1 no total, pares + modelo
-    --   S4 = 1 por alvo, só pares
-    -- [FIXED v12] ID DE SESSÃO DO HIT DINÂMICO. O 4.º argumento do RegisterHit estava
-    -- FIXO ("078da5141"). Em scripts open source de 2025-2026 (haxhell "Auto Kill Open
-    -- Source with Fast Attack") esse ID é calculado: 3 caracteres do teu UserId
-    -- (tostring(UserId):sub(2,4)) + 5 caracteres do endereço da "combat thread" do jogo
-    -- (tostring(getupvalues(getrenv()._G.SendHitsToServer)[1]):sub(11,15)). O endereço
-    -- muda de sessão para sessão/servidor, por isso um ID fixo só vale onde foi
-    -- capturado ("hits tudo-ou-nada por servidor", como descreve o blox-fast-farm).
-    -- Recalculado de 1 em 1 s; se o executor não tiver getrenv/getupvalues usa o fixo.
-    HitSessionFallback = "078da5141"
-    HitSessionCache = {id = nil, t = 0, dynamic = false}
-    function GetHitSessionId()
-        local c = HitSessionCache
-        if c.id and tick() - c.t < 1 then return c.id end
-        local ok, id = pcall(function()
-            local send = getrenv()._G.SendHitsToServer
-            local thread = getupvalues(send)[1]
-            local userSlice = tostring(game.Players.LocalPlayer.UserId):sub(2, 4)
-            local memSlice  = tostring(thread):sub(11, 15)
-            return userSlice .. memSlice
-        end)
-        if ok and type(id) == "string" and #id >= 6 then
-            if c.id ~= id then pcall(print, "[BombaCat Hub] ID de sessão do hit: " .. id .. " (dinâmico)") end
-            c.id, c.t, c.dynamic = id, tick(), true
-        else
-            if c.id ~= HitSessionFallback then pcall(print, "[BombaCat Hub] ID de sessão do hit: fixo (getrenv/getupvalues indisponível)") end
-            c.id, c.t, c.dynamic = HitSessionFallback, tick(), false
-        end
-        return c.id
-    end
-
-    -- [FIXED v13] UM PACOTE DE HIT POR ALVO (formato do script open source verificado).
-    -- Sintoma: o script mata mas ficam sempre ~2 mobs vivos. Causa provável: no pacote
-    -- único com TODOS os mobs numa lista (e o modelo duplicado a seguir a cada par) o
-    -- servidor só trata o 1.º alvo; o mob que o script está a atacar (e que não é o 1.º
-    -- da lista) fica sem dano, a regra "2s sem perder vida" marca-o como falhado
-    -- (FailureCount), manda-o de volta ao spawn e ele deixa de ser alvo.
-    -- Agora S1 = um RegisterAttack + um RegisterHit(parte, {}, nil, ID) POR MOB, como o
-    -- script open source (haxhell). Se nada levar dano, roda: S2 = pacote único
-    -- (1.º alvo + lista dos outros), S3 = o teu original, S4 = pacote único só com pares.
-    HitStrategy = 1
-    HitStrategyTick = 0
-    HIT_STRATEGIES = {"per", "others", "orig", "pairs"}
-    function RotateHitStrategy(reason)
-        if tick() - HitStrategyTick < 1.5 then return end
-        HitStrategyTick = tick()
-        HitStrategy = HitStrategy % #HIT_STRATEGIES + 1
-        pcall(print, "[BombaCat Hub] formato de hit -> S" .. HitStrategy .. " (" .. HIT_STRATEGIES[HitStrategy] .. ", " .. tostring(reason) .. ")")
-    end
     function h:Attack()
         local X = {}
         for y, y in pairs(GetAllBladeHits()) do table.insert(X, y) end
@@ -2211,53 +2156,14 @@ end
             for y, y in pairs(Getplayerhit()) do table.insert(X, y) end
         end
         if #X == 0 then return end
-        local me = game.Players.LocalPlayer.Character
-        local myRoot = me and me:FindFirstChild("HumanoidRootPart")
-        if myRoot then
-            local mp = myRoot.Position
-            table.sort(X, function(m1, m2)
-                return (m1.HumanoidRootPart.Position - mp).Magnitude < (m2.HumanoidRootPart.Position - mp).Magnitude
-            end)
-        end
-        local mode = HIT_STRATEGIES[HitStrategy] or HIT_STRATEGIES[1]
-        local id = GetHitSessionId()
-        local function mainPart(L) return L:FindFirstChild("Head") or L:FindFirstChild("HumanoidRootPart") end
-
-        if mode == "per" then
-            for _, L in ipairs(X) do
-                local pt = mainPart(L)
-                if pt then
-                    w:FireServer(0)
-                    D:FireServer(pt, {}, nil, id)
-                end
-            end
-        elseif mode == "others" then
-            local main = mainPart(X[1])
-            if not main then return end
-            local others = {}
-            for k = 2, #X do
-                local hr = X[k]:FindFirstChild("HumanoidRootPart")
-                if hr then others[#others + 1] = {X[k], hr} end
-            end
+        local y = {[1] = nil, [2] = {}, [4] = "078da5141"}
+        for L, L in pairs(X) do
             w:FireServer(0)
-            D:FireServer(main, others, nil, id)
-        elseif mode == "pairs" then
-            local list = {}
-            for _, L in ipairs(X) do list[#list + 1] = {L, L.HumanoidRootPart} end
-            local main = mainPart(X[1])
-            if not main then return end
-            w:FireServer(0)
-            D:FireServer(main, list, nil, id)
-        else -- "orig": o formato original do script (1 RegisterAttack por alvo, pares + modelo duplicado)
-            local y = {[1] = nil, [2] = {}, [4] = id}
-            for _, L in ipairs(X) do
-                w:FireServer(0)
-                if not y[1] then y[1] = L.Head end
-                table.insert(y[2], {[1] = L, [2] = L.HumanoidRootPart})
-                table.insert(y[2], L)
-            end
-            D:FireServer(unpack(y))
+            if not y[1] then y[1] = L.Head end
+            table.insert(y[2], {[1] = L, [2] = L.HumanoidRootPart})
+            table.insert(y[2], L)
         end
+        D:FireServer(unpack(y))
     end
     task.spawn(function()
         while task.wait(.06) do if _G.FastAttack == os.time() then pcall(function() h:Attack() end) end end
@@ -2310,190 +2216,150 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
         AttackFilterTick  = tick()
     end
 
-    -- ============================================================
-    -- [NEW v11] BRING MOBS REFEITO (do zero)
-    -- * Mobs puxados para um ANEL pequeno à volta do mob de referência (1.º mob
-    --   atacado), não todos para o MESMO ponto: os hubs testados também os põem
-    --   num anel, e empilhar tudo no mesmo sítio é um dos suspeitos do "só mata
-    --   quando há mais de 4".
-    -- * Trela: só puxa mobs cujo SPAWN (atributo OldPosition) está a <= BringLeash
-    --   do ponto de atração; raio mob->âncora <= BringRadius. Mais perto primeiro.
-    -- * Ownership testado na prática (probe/ok/ghost): se o servidor devolve o mob,
-    --   é fantasma e deixa de ser puxado 8s. Fantasmas NÃO entram nos hits (v9).
-    -- * Watchdog: mob puxado, ao alcance, sem perder vida 3.5s enquanto os hits
-    --   entram noutro = imune/trela -> devolvido ao spawn e deixado em paz 30s.
-    -- * Fast attack: alvo mais próximo primeiro e formato do pacote de hit
-    --   adaptativo, mas SÓ enquanto o bring estiver a puxar (senão fica S1 = original).
-    -- * Painel: "Bring: X puxados, Y fantasma, Z imunes | Hit S#".
-    -- * Tudo dentro de do...end: não gasta registos locais do chunk principal.
-    -- ============================================================
-    BringProbe = setmetatable({}, {__mode = "k"})   -- global: o fast attack também a lê
-    BringActiveTick = 0
-    BringDbgText = nil
-    BringDbgTick = 0
-    HitLandedTick = 0
-
-    do
-        local PRISON_CENTER = Vector3.new(4870, 6, 736)
-        local function onPrisonIsland()
-            if SeaIndex ~= 1 then return false end
-            local c = game.Players.LocalPlayer.Character
-            local r = c and c:FindFirstChild("HumanoidRootPart")
-            return r ~= nil and (r.Position - PRISON_CENTER).Magnitude < 1500
-        end
-        -- prisioneiros: só bloqueados NA ilha da prisão
-        local function prisonerBlocked(name)
-            return string.find(string.lower(name), "prisoner", 1, true) ~= nil and onPrisonIsland()
-        end
-        -- alvos onde o utilizador decidiu não usar bring
-        local function noBringName(name)
-            return name == "Shanda" or name == "Royal Squad" or name == "Royal Soldier"
-        end
-        local function isMineStrict(part)
-            if not isnetworkowner then return false end
-            local ok, res = pcall(isnetworkowner, part)
-            return ok and res == true
-        end
-        local function liveMob(m, folder)
-            if not m or m.Parent ~= folder then return false end
-            local hm = m:FindFirstChildOfClass("Humanoid")
-            return hm ~= nil and hm.Health > 0 and m:FindFirstChild("HumanoidRootPart") ~= nil
-        end
-
-        local simTick = 0
-        local homeCache = setmetatable({}, {__mode = "k"})
-
-        BringEnemy = function()
-            if not Config.BringMobs then return end
-            local folder = workspace:FindFirstChild("Enemies")
-            if not folder then return end
-            local anchor = BringAnchor
-            if not liveMob(anchor, folder) then return end
-            if tick() - BringAnchorTick > 2.0 then return end
-            if noBringName(anchor.Name) or prisonerBlocked(anchor.Name) then return end
-
-            local now = tick()
-            if now - simTick > 1 then
-                simTick = now
-                local lp = game.Players.LocalPlayer
-                pcall(function() sethiddenproperty(lp, "SimulationRadius", math.huge) end)
-                pcall(function() sethiddenproperty(lp, "MaximumSimulationRadius", math.huge) end)
-            end
-
-            local radius  = Config.BringRadius or 250
-            local leash   = Config.BringLeash or 250
-            local maxPull = Config.BringMaxMobs or 30
-            local aPos    = anchor.HumanoidRootPart.Position
-            local activeNames = AttackFilterNames
-            local filterFresh = activeNames and (now - (AttackFilterTick or 0)) <= 1.5
-            local pChar = game.Players.LocalPlayer.Character
-            local pRoot = pChar and pChar:FindFirstChild("HumanoidRootPart")
-            local plPos = pRoot and pRoot.Position
-
-            -- 1) candidatos: mesmo nome do farm, vivos, dentro do raio e da trela
-            local cands, ghosts, immune = {}, 0, 0
-            for _, v in ipairs(folder:GetChildren()) do
-                if v ~= anchor and (filterFresh and activeNames[v.Name] or v.Name == anchor.Name)
-                   and not noBringName(v.Name) and not prisonerBlocked(v.Name) then
-                    local hum  = v:FindFirstChildOfClass("Humanoid")
-                    local root = v:FindFirstChild("HumanoidRootPart")
-                    if hum and root and hum.Health > 0 then
-                        local st = BringProbe[v]
-                        if st and st.state == "ghost" and now < st.untilT then
-                            if st.immune then immune = immune + 1 else ghosts = ghosts + 1 end
-                        else
-                            if st and st.state == "ghost" then BringProbe[v] = nil end
-                            local home = v:GetAttribute("OldPosition")
-                            if typeof(home) ~= "Vector3" then
-                                home = homeCache[v]
-                                if not home then home = root.Position; homeCache[v] = home end
-                            end
-                            local d = (root.Position - aPos).Magnitude
-                            if d <= radius and (home - aPos).Magnitude <= leash then
-                                cands[#cands + 1] = {v = v, root = root, hum = hum, d = d, home = home}
-                            end
-                        end
-                    end
-                end
-            end
-
-            -- 2) mais perto primeiro, no máximo maxPull, num anel à volta da âncora
-            table.sort(cands, function(a, b) return a.d < b.d end)
-            local n = math.min(#cands, maxPull)
-            local ringR = math.clamp(3 + n * 0.6, 4, 9)
-            local pulled = 0
-            for i = 1, n do
-                local c = cands[i]
-                local ang  = (i - 1) * (2 * math.pi / n)
-                local slot = aPos + Vector3.new(math.cos(ang) * ringR, 0, math.sin(ang) * ringR)
-                local st = BringProbe[c.v]
-                if not st then
-                    st = {t0 = now, state = "probe", bad = 0}
-                    BringProbe[c.v] = st
-                end
-                local dist = (c.root.Position - slot).Magnitude
-
-                if st.state == "probe" then
-                    -- teste empírico de ownership: ao fim de 0.35s está no anel? (servidor aceitou)
-                    if now - st.t0 > 0.35 then
-                        if dist < 8 or isMineStrict(c.root) then
-                            st.state = "ok"; st.hp = c.hum.Health; st.hpT = now
-                        else
-                            st.state = "ghost"; st.untilT = now + 8
-                        end
-                    end
-                elseif st.state == "ok" then
-                    if dist > 20 and not isMineStrict(c.root) then
-                        st.bad = st.bad + 1
-                        if st.bad > 20 then st.state = "ghost"; st.untilT = now + 8; st.bad = 0 end
-                    else
-                        st.bad = 0
-                    end
-                    -- watchdog de imunes
-                    if st.state == "ok" then
-                        local hpNow = c.hum.Health
-                        if st.hp == nil or hpNow < st.hp - 0.01 then
-                            st.hp = hpNow; st.hpT = now
-                        elseif plPos and (c.root.Position - plPos).Magnitude <= 60
-                               and now - (HitLandedTick or 0) < 1.5 then
-                            if now - (st.hpT or now) > 3.5 then
-                                pcall(function() c.root.CFrame = CFrame.new(c.home) end)
-                                st.state = "ghost"; st.untilT = now + 30; st.immune = true
-                            end
-                        else
-                            st.hpT = now
-                        end
-                    end
-                end
-
-                if st.state == "ghost" then
-                    if st.immune then immune = immune + 1 else ghosts = ghosts + 1 end
-                else
-                    pulled = pulled + 1
-                    pcall(function()
-                        if dist > 1.5 then
-                            c.root.CFrame = CFrame.lookAt(slot, Vector3.new(aPos.X, slot.Y, aPos.Z))
-                        end
-                        c.root.CanCollide = false
-                        c.root.AssemblyLinearVelocity  = Vector3.zero
-                        c.root.AssemblyAngularVelocity = Vector3.zero
-                        local head = c.v:FindFirstChild("Head")
-                        if head then head.CanCollide = false end
-                    end)
-                end
-            end
-
-            if pulled > 0 then BringActiveTick = now end
-            BringDbgText = "Bring: " .. pulled .. " puxados, " .. ghosts .. " fantasma, " .. immune
-                .. " imunes | Hit S" .. tostring(HitStrategy or 1)
-                .. (HitSessionCache and HitSessionCache.dynamic and " ID-D" or " ID-F")
-            BringDbgTick = now
-        end
-
-        game:GetService("RunService").Heartbeat:Connect(function()
-            pcall(BringEnemy)
-        end)
+    -- Prisioneiros: o bring só é bloqueado para NPCs "prisoner" quando o jogador
+    -- está na ilha da prisão (Sea 1). Em qualquer outro sítio funciona normal.
+    local PRISON_CENTER = Vector3.new(4870, 6, 736)
+    local function _onPrisonIsland()
+        if SeaIndex ~= 1 then return false end
+        local c = game.Players.LocalPlayer.Character
+        local r = c and c:FindFirstChild("HumanoidRootPart")
+        return r ~= nil and (r.Position - PRISON_CENTER).Magnitude < 1500
     end
+    local function _isPrisonerBlocked(name)
+        return string.find(string.lower(name), "prisoner", 1, true) ~= nil and _onPrisonIsland()
+    end
+
+    -- [v8] teste empírico de ownership: estado por mob = probe / ok / ghost
+    BringProbe = setmetatable({}, {__mode = "k"})   -- global: o fast attack também a lê
+    local function _isMineStrict(part)
+        if not isnetworkowner then return false end
+        local ok, res = pcall(isnetworkowner, part)
+        return ok and res == true
+    end
+    local _bringSimTick = 0
+    local function _isMine(part)
+        -- Network ownership APIs differ between executors. Treat errors as
+        -- non-blocking and do not reject the whole Bring cycle on a false/unknown result.
+        if not isnetworkowner then return true end
+        local ok, res = pcall(isnetworkowner, part)
+        if not ok or res == nil then return true end
+        return res == true
+    end
+
+    BringEnemy = function()
+        if not Config.BringMobs then return end
+        local anchor = BringAnchor
+        if not anchor or anchor.Parent ~= workspace:FindFirstChild("Enemies") then return end  -- ignora templates do ReplicatedStorage
+        -- SHANDA / ROYAL SQUAD / ROYAL SOLDIER FIX: não usar Bring Mobs nestes alvos.
+        -- O ciclo de atração pode interferir quando restam poucos inimigos da missão.
+        if anchor.Name == "Shanda" or anchor.Name == "Royal Squad" or anchor.Name == "Royal Soldier" then return end
+        -- Prisoner NPCs: nunca usar como âncora — mas só na ilha da prisão.
+        if _isPrisonerBlocked(anchor.Name) then return end
+        -- Allow a slightly wider scheduling gap; the attack loop refreshes this
+        -- timestamp while the target remains alive.
+        if tick() - BringAnchorTick > 2.0 then return end
+        local aHum  = anchor:FindFirstChildOfClass("Humanoid")
+        local aRoot = anchor:FindFirstChild("HumanoidRootPart")
+        if not aHum or aHum.Health <= 0 or not aRoot then return end
+
+        local folder = workspace:FindFirstChild("Enemies")
+        if not folder then return end
+
+        -- network ownership: re-aplicar 1x por segundo chega
+        if tick() - _bringSimTick > 1 then
+            _bringSimTick = tick()
+            pcall(function() sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge) end)
+            pcall(function() sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", math.huge) end)
+        end
+
+        local radius  = Config.BringRadius or 800
+        local maxPull = Config.BringMaxMobs or 30
+        local target  = aRoot.CFrame
+        local aPos    = aRoot.Position
+        local pulled  = 0
+        local notOwner = 0
+        -- Use the names passed to the current CombatController.Attack call.
+        -- If that short-lived filter is unavailable, fall back to the anchor's name.
+        local activeNames = AttackFilterNames
+        local filterFresh = activeNames and (tick() - (AttackFilterTick or 0)) <= 1.5
+
+        for _, v in ipairs(folder:GetChildren()) do
+            if pulled >= maxPull then break end
+            local isPrisoner = _isPrisonerBlocked(v.Name)
+            local isSpecialNoBring = v.Name == "Shanda" or v.Name == "Royal Squad" or v.Name == "Royal Soldier"
+            local isFarmTarget = filterFresh and activeNames[v.Name] or v.Name == anchor.Name
+            -- Não puxar Shandas, Royal Squads nem Royal Soldiers, mesmo como alvos secundários.
+            if v ~= anchor and not isPrisoner and not isSpecialNoBring and isFarmTarget then
+                local hum  = v:FindFirstChildOfClass("Humanoid")
+                local root = v:FindFirstChild("HumanoidRootPart")
+                if hum and root and hum.Health > 0
+                   and (root.Position - aPos).Magnitude <= radius then
+                    -- [FIXED v8] TESTE EMPÍRICO DE OWNERSHIP (isnetworkowner() falha/mente em
+                    -- vários executors e com ele o bring deixou de puxar). Puxa-se o mob e
+                    -- vê-se o que acontece: se ao fim de 0.35s ele continua junto ao ponto de
+                    -- atração, o servidor aceitou a posição (ok); se voltou ao sítio dele, é um
+                    -- "fantasma" (só se mexia no teu ecrã): deixa de ser puxado durante 8s e
+                    -- depois volta a ser testado. Fantasmas = mobs que o servidor não te deu.
+                    local now  = tick()
+                    local st   = BringProbe[v]
+                    local dist = (root.Position - aPos).Magnitude
+                    local skip = false
+                    if st and st.state == "ghost" then
+                        if now >= st.untilT then
+                            BringProbe[v] = nil
+                            st = nil
+                        else
+                            skip = true
+                            notOwner = notOwner + 1
+                        end
+                    end
+                    if not skip then
+                        if not st then
+                            st = {t0 = now, state = "probe", bad = 0}
+                            BringProbe[v] = st
+                        end
+                        if st.state == "probe" then
+                            if now - st.t0 > 0.35 then
+                                if dist < 8 or _isMineStrict(root) then
+                                    st.state = "ok"
+                                else
+                                    st.state = "ghost"; st.untilT = now + 8
+                                end
+                            end
+                        elseif st.state == "ok" then
+                            if dist > 20 and not _isMineStrict(root) then
+                                st.bad = st.bad + 1
+                                if st.bad > 20 then st.state = "ghost"; st.untilT = now + 8; st.bad = 0 end
+                            else
+                                st.bad = 0
+                            end
+                        end
+                        if st.state == "ghost" then
+                            notOwner = notOwner + 1
+                        else
+                            pulled = pulled + 1
+                            pcall(function()
+                                if dist > 2 then
+                                    root.CFrame = target
+                                end
+                                root.CanCollide = false
+                                root.AssemblyLinearVelocity  = Vector3.zero
+                                root.AssemblyAngularVelocity = Vector3.zero
+                                local head = v:FindFirstChild("Head")
+                                if head then head.CanCollide = false end
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+        BringDbgText = "Bring: " .. pulled .. " puxados, " .. notOwner .. " fantasma"
+        BringDbgTick = tick()
+    end
+
+    game:GetService("RunService").Heartbeat:Connect(function()
+        pcall(BringEnemy)
+    end)
 
 
 
@@ -2627,7 +2493,6 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                 local h, w = 0, os.time()
                 SetTask('SubTask', '⚔️ Attacking ' .. tostring(MonResult.Name))
                 local w, b = 0, os.time()
-                local lastHP, lastDmgT, inRangeT, rotCount = nil, tick(), nil, 0
                 while task.wait() do
                     if _G.Stop then return end
 
@@ -2680,13 +2545,6 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                         if MonResult.Name == "Don Swan" then Storage:Set("SwanDefeated", true) end
                         break
                     end
-                    -- [v11] regista quando o alvo perde vida (os hits estão a entrar)
-                    if lastHP == nil or C.Health < lastHP - 0.01 then
-                        lastDmgT = tick()
-                        HitLandedTick = tick()
-                        rotCount = 0
-                    end
-                    lastHP = C.Health
                     -- Keep the Bring anchor alive throughout approach and attack,
                     -- not only after reaching the 150-stud combat radius.
                     if MonResult.Parent == workspace:FindFirstChild("Enemies") then
@@ -2697,18 +2555,6 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                         y = D and D()
                         CombatController.Grab(L or '')
                         BringKeepAlive()
-                        -- [v11] com o bring a puxar, ao alcance (<=60) há 1.4s e o alvo não perde
-                        -- vida: o formato do pacote de hit não está a ser aceite -> tenta o seguinte.
-                        if rotCount < 4 and CaculateDistance(p.Position) <= 60 then
-                            if not inRangeT then inRangeT = tick(); lastDmgT = math.max(lastDmgT, inRangeT) end
-                            if MonResult.Name ~= "Core" and tick() - lastDmgT > 1.4 then
-                                RotateHitStrategy("sem dano ao alcance")
-                                rotCount = rotCount + 1
-                                lastDmgT = tick()
-                            end
-                        else
-                            inRangeT = nil
-                        end
                         if MonResult.Name ~= "Core" then
                             if ScriptStorage.PlayerData.Level > 100 and w >= CombatController.MAX_ATTACK_DURATION_2 and C.Health - C.MaxHealth == 0 then
                                 SetTask('SubTask', 'Hop Server - Mob Health Unchanged ( ' .. C.Health .. ' / ' .. C.MaxHealth .. ')')
@@ -4010,6 +3856,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     -- ============================================================
     FunctionsHandler.LocalPlayerController:RegisterMethod("EquipTool", function(h)
         if not Humanoid then return end
+        if _G.HoldKey and tostring(h) ~= "Key" then return end
         local bp = LocalPlayer:FindFirstChild("Backpack")
         if not bp then return end
         for X, X in bp:GetChildren() do
@@ -6524,37 +6371,60 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
     -- AUTO SEA 2 & 3 (CÁC THREAD RIÊNG)
     -- ============================================================
     task.spawn(function()
-        while task.wait(0.5) do
-            if Config.AutoSea2 then
-                pcall(function()
-                    if ScriptStorage.PlayerData.Level >= 700 and SeaIndex ~= 2 then
-                        _G.SeaTransitionActive = true  -- [ADDED] đồng bộ với AutoSea3, tránh LevelFarm giành tween
-                        local iceDoor = workspace.Map.Ice.Door
-                        if iceDoor and iceDoor.CanCollide == true and iceDoor.Transparency == 0 then
-                            Remotes.CommF_:InvokeServer("DressrosaQuestProgress", "Detective")
-                            FunctionsHandler.LocalPlayerController.Methods.EquipTool:Call("Key")
-                            TweenController.Create(CFrame.new(1347.71, 37.38, -1325.65))
-                            repeat task.wait() until not Config.AutoSea2 or (HumanoidRootPart and (HumanoidRootPart.Position - Vector3.new(1347.71, 37.38, -1325.65)).Magnitude < 5)
-                        elseif iceDoor and iceDoor.CanCollide == false and iceDoor.Transparency == 1 then
-                            if workspace.Enemies:FindFirstChild("Ice Admiral") then
-                                CombatController.Attack("Ice Admiral")
-                                repeat task.wait() until not Config.AutoSea2 or not workspace.Enemies:FindFirstChild("Ice Admiral") or workspace.Enemies["Ice Admiral"].Humanoid.Health <= 0
-                                Remotes.CommF_:InvokeServer("TravelDressrosa")
-                            else
-                                TweenController.Create(CFrame.new(1347.71, 37.38, -1325.65))
-                            end
-                        else
-                            Remotes.CommF_:InvokeServer("TravelDressrosa")
+        -- [FIX Sea2] Reescrito: antes ficava 60s parado a segurar a Chave sem chamar UseKey
+        -- e brigava com o LevelFarm (que re-equipava o Melee). Agora segue o fluxo
+        -- Detective -> UseKey -> Ice Admiral -> TravelDressrosa, sem bloqueios longos.
+        local DOOR_CF = CFrame.new(1347.71, 37.38, -1325.65)
+        while task.wait(1) do
+            if Config.AutoSea2 and (ScriptStorage.PlayerData.Level or 0) >= 700 and SeaIndex == 1 then
+                local ok, err = pcall(function()
+                    _G.SeaTransitionActive = true
+                    local prog = Remotes.CommF_:InvokeServer("DressrosaQuestProgress")
+                    if type(prog) ~= "table" then return end
+
+                    if prog.KilledIceBoss then
+                        SetTask("MainTask", "Auto Second Sea - Travel")
+                        Remotes.CommF_:InvokeServer("TravelDressrosa")
+                        task.wait(5)
+                        return
+                    end
+
+                    if not prog.TalkedDetective then
+                        SetTask("MainTask", "Auto Second Sea - Talk To Detective")
+                        Remotes.CommF_:InvokeServer("DressrosaQuestProgress", "Detective")
+                        task.wait(1)
+                        return
+                    end
+
+                    local iceDoor = workspace.Map.Ice.Door
+                    if iceDoor and iceDoor.CanCollide == true and iceDoor.Transparency == 0 then
+                        -- porta fechada: segurar a Chave, ir até à porta e usar a chave
+                        SetTask("MainTask", "Auto Second Sea - Opening Ice Door")
+                        _G.HoldKey = true
+                        FunctionsHandler.LocalPlayerController.Methods.EquipTool:Call("Key")
+                        TweenController.Create(DOOR_CF)
+                        if HumanoidRootPart and (HumanoidRootPart.Position - DOOR_CF.Position).Magnitude < 8 then
+                            Remotes.CommF_:InvokeServer("DressrosaQuestProgress", "UseKey")
+                            task.wait(1.5)
                         end
-                        -- [ADDED] Check PlaceId thật để xác nhận đã sang Sea 2, timeout 60s tránh treo vĩnh viễn
-                        local waitStart = tick()
-                        repeat
-                            task.wait(1)
-                        until game.PlaceId == 4442272183 or game.PlaceId == 79091703265657
-                           or SeaIndex == 2 or (tick() - waitStart) > 60
-                        _G.SeaTransitionActive = false
+                    else
+                        -- porta aberta: matar o Ice Admiral
+                        _G.HoldKey = false
+                        SetTask("MainTask", "Auto Second Sea - Defeating Ice Admiral")
+                        local boss = workspace.Enemies:FindFirstChild("Ice Admiral")
+                        if boss and boss:FindFirstChild("Humanoid") and boss.Humanoid.Health > 0 then
+                            CombatController.Attack("Ice Admiral")
+                        else
+                            TweenController.Create(DOOR_CF)
+                        end
                     end
                 end)
+                if not ok then warn("[BombaCat Hub] AutoSea2:", err) end
+            else
+                _G.HoldKey = false
+                if not (Config.AutoSea3 and (ScriptStorage.PlayerData.Level or 0) >= 1500 and SeaIndex ~= 3) then
+                    _G.SeaTransitionActive = false
+                end
             end
         end
     end)
