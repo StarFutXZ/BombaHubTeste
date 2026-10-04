@@ -2186,19 +2186,23 @@ end
         return c.id
     end
 
+    -- [FIXED v13] UM PACOTE DE HIT POR ALVO (formato do script open source verificado).
+    -- Sintoma: o script mata mas ficam sempre ~2 mobs vivos. Causa provável: no pacote
+    -- único com TODOS os mobs numa lista (e o modelo duplicado a seguir a cada par) o
+    -- servidor só trata o 1.º alvo; o mob que o script está a atacar (e que não é o 1.º
+    -- da lista) fica sem dano, a regra "2s sem perder vida" marca-o como falhado
+    -- (FailureCount), manda-o de volta ao spawn e ele deixa de ser alvo.
+    -- Agora S1 = um RegisterAttack + um RegisterHit(parte, {}, nil, ID) POR MOB, como o
+    -- script open source (haxhell). Se nada levar dano, roda: S2 = pacote único
+    -- (1.º alvo + lista dos outros), S3 = o teu original, S4 = pacote único só com pares.
     HitStrategy = 1
     HitStrategyTick = 0
-    HIT_STRATEGIES = {
-        {perTargetAttack = true,  dupModel = true },
-        {perTargetAttack = false, dupModel = false},
-        {perTargetAttack = false, dupModel = true },
-        {perTargetAttack = true,  dupModel = false},
-    }
+    HIT_STRATEGIES = {"per", "others", "orig", "pairs"}
     function RotateHitStrategy(reason)
         if tick() - HitStrategyTick < 1.5 then return end
         HitStrategyTick = tick()
         HitStrategy = HitStrategy % #HIT_STRATEGIES + 1
-        pcall(print, "[BombaCat Hub] formato de hit -> S" .. HitStrategy .. " (" .. tostring(reason) .. ")")
+        pcall(print, "[BombaCat Hub] formato de hit -> S" .. HitStrategy .. " (" .. HIT_STRATEGIES[HitStrategy] .. ", " .. tostring(reason) .. ")")
     end
     function h:Attack()
         local X = {}
@@ -2207,7 +2211,6 @@ end
             for y, y in pairs(Getplayerhit()) do table.insert(X, y) end
         end
         if #X == 0 then return end
-        if tick() - (BringActiveTick or 0) > 6 then HitStrategy = 1 end
         local me = game.Players.LocalPlayer.Character
         local myRoot = me and me:FindFirstChild("HumanoidRootPart")
         if myRoot then
@@ -2216,16 +2219,45 @@ end
                 return (m1.HumanoidRootPart.Position - mp).Magnitude < (m2.HumanoidRootPart.Position - mp).Magnitude
             end)
         end
-        local st = HIT_STRATEGIES[HitStrategy] or HIT_STRATEGIES[1]
-        local y = {[1] = nil, [2] = {}, [4] = GetHitSessionId()}
-        if not st.perTargetAttack then w:FireServer(0) end
-        for _, L in ipairs(X) do
-            if st.perTargetAttack then w:FireServer(0) end
-            if not y[1] then y[1] = L.Head end
-            table.insert(y[2], {[1] = L, [2] = L.HumanoidRootPart})
-            if st.dupModel then table.insert(y[2], L) end
+        local mode = HIT_STRATEGIES[HitStrategy] or HIT_STRATEGIES[1]
+        local id = GetHitSessionId()
+        local function mainPart(L) return L:FindFirstChild("Head") or L:FindFirstChild("HumanoidRootPart") end
+
+        if mode == "per" then
+            for _, L in ipairs(X) do
+                local pt = mainPart(L)
+                if pt then
+                    w:FireServer(0)
+                    D:FireServer(pt, {}, nil, id)
+                end
+            end
+        elseif mode == "others" then
+            local main = mainPart(X[1])
+            if not main then return end
+            local others = {}
+            for k = 2, #X do
+                local hr = X[k]:FindFirstChild("HumanoidRootPart")
+                if hr then others[#others + 1] = {X[k], hr} end
+            end
+            w:FireServer(0)
+            D:FireServer(main, others, nil, id)
+        elseif mode == "pairs" then
+            local list = {}
+            for _, L in ipairs(X) do list[#list + 1] = {L, L.HumanoidRootPart} end
+            local main = mainPart(X[1])
+            if not main then return end
+            w:FireServer(0)
+            D:FireServer(main, list, nil, id)
+        else -- "orig": o formato original do script (1 RegisterAttack por alvo, pares + modelo duplicado)
+            local y = {[1] = nil, [2] = {}, [4] = id}
+            for _, L in ipairs(X) do
+                w:FireServer(0)
+                if not y[1] then y[1] = L.Head end
+                table.insert(y[2], {[1] = L, [2] = L.HumanoidRootPart})
+                table.insert(y[2], L)
+            end
+            D:FireServer(unpack(y))
         end
-        D:FireServer(unpack(y))
     end
     task.spawn(function()
         while task.wait(.06) do if _G.FastAttack == os.time() then pcall(function() h:Attack() end) end end
@@ -2595,7 +2627,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                 local h, w = 0, os.time()
                 SetTask('SubTask', '⚔️ Attacking ' .. tostring(MonResult.Name))
                 local w, b = 0, os.time()
-                local lastHP, lastDmgT, inRangeT = nil, tick(), nil
+                local lastHP, lastDmgT, inRangeT, rotCount = nil, tick(), nil, 0
                 while task.wait() do
                     if _G.Stop then return end
 
@@ -2652,6 +2684,7 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                     if lastHP == nil or C.Health < lastHP - 0.01 then
                         lastDmgT = tick()
                         HitLandedTick = tick()
+                        rotCount = 0
                     end
                     lastHP = C.Health
                     -- Keep the Bring anchor alive throughout approach and attack,
@@ -2666,10 +2699,11 @@ function W.Attack(target) pcall(function() _G.FastAttack = os.time() end) end
                         BringKeepAlive()
                         -- [v11] com o bring a puxar, ao alcance (<=60) há 1.4s e o alvo não perde
                         -- vida: o formato do pacote de hit não está a ser aceite -> tenta o seguinte.
-                        if tick() - (BringActiveTick or 0) < 3 and CaculateDistance(p.Position) <= 60 then
+                        if rotCount < 4 and CaculateDistance(p.Position) <= 60 then
                             if not inRangeT then inRangeT = tick(); lastDmgT = math.max(lastDmgT, inRangeT) end
                             if MonResult.Name ~= "Core" and tick() - lastDmgT > 1.4 then
                                 RotateHitStrategy("sem dano ao alcance")
+                                rotCount = rotCount + 1
                                 lastDmgT = tick()
                             end
                         else
