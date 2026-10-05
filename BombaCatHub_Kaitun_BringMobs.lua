@@ -860,9 +860,9 @@ function Spring:step(state, dt)
 		--    z = sin(a*c)/c
 		-- Take the Maclaurin expansion of z with respect to c:
 		--    z = a - (a^3*c^2)/6 + (a^5*c^4)/120 + O(c^6)
-		--    z Ð²â€°â‚¬ a - (a^3*c^2)/6 + (a^5*c^4)/120
+		--    z в‰€ a - (a^3*c^2)/6 + (a^5*c^4)/120
 		-- Rewrite in Horner form:
-		--    z Ð²â€°â‚¬ a + ((a*a)*(c*c)*(c*c)/20 - c*c)*(a*a*a)/6
+		--    z в‰€ a + ((a*a)*(c*c)*(c*c)/20 - c*c)*(a*a*a)/6
 
 		local z
 		if c > EPS then
